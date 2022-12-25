@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 
 import os
+import aiohttp
 from bilibili_api import video
 import util
-import aiohttp
 
 # mode		operation
 # ---------------------------------------------------
@@ -108,6 +108,6 @@ async def main(args):
 
 if __name__ == "__main__":
 	args = util.parse_args()
-	util.sync(main(args))
+	util.run(main(args))
 
 

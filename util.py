@@ -18,7 +18,8 @@ agent = {
 log_prefix = ["FATAL", "ERROR", "WARNING", "INFO", "VERBOSE", "TRACE"]
 log_level = 3
 
-stall_duration = 4
+stall_mutex = asyncio.Lock()
+stall_duration = 1
 stall_timestamp = 0
 
 tmp_postfix = None
@@ -45,16 +46,21 @@ def loge(msg):
 def logf(msg):
 	do_log(0, msg)
 
+
 async def stall():
+	global stall_mutex
 	global stall_timestamp
 	ratio_ns = 1000 * 1000 * 1000
-	timestamp = time.monotonic_ns()
-	time_diff = timestamp - stall_timestamp
-	stall_timestamp = timestamp
-	time_wait = stall_duration * ratio_ns - time_diff
-	logv("stall " + str(max(time_wait, 0)) + "ns")
-	if time_diff > 0 and time_wait > 0:
-		await asyncio.sleep(time_wait / ratio_ns)
+
+	async with stall_mutex:
+		timestamp = time.monotonic_ns()
+		time_diff = timestamp - stall_timestamp
+		stall_timestamp = timestamp
+		time_wait = stall_duration * ratio_ns - time_diff
+		logv("stall " + str(max(time_wait, 0)) + "ns")
+		if time_diff > 0 and time_wait > 0:
+			await asyncio.sleep(time_wait / ratio_ns)
+
 
 def mkdir(path):
 	try:
@@ -63,6 +69,7 @@ def mkdir(path):
 	except FileExistsError:
 		logt("exist" + path)
 		pass
+
 
 def parse_args():
 	global log_level
@@ -92,8 +99,8 @@ def parse_args():
 		tmp_postfix = ".tmp"
 
 	logt(args)
-
 	return args
+
 
 def opt_path(path):
 	if not path:
@@ -103,6 +110,7 @@ def opt_path(path):
 	else:
 		return path
 
+
 def handle_exception(e, msg):
 	traceback.print_exc()
 	print(msg, file = sys.stderr, flush = True)
@@ -111,8 +119,9 @@ def handle_exception(e, msg):
 		raise
 
 
-def sync(func):
+def run(func):
 	asyncio.get_event_loop().run_until_complete(func)
+
 
 def credential(auth_file):
 	parser = re.compile(r"(\S+)[\s\=\:]+(\S+)\s*")
@@ -126,6 +135,7 @@ def credential(auth_file):
 				info[match.group(1)] = match.group(2)
 
 	return Credential(**info)
+
 
 async def save_json(obj, path):
 	logt("saving json " + path)
@@ -142,31 +152,48 @@ async def save_json(obj, path):
 		os.replace(tmp_name, path)
 
 
-async def fetch(sess, url, path):
+async def fetch(sess, url, path, mode = "file"):
 	logt("fetching " + url + " into " + path)
 	async with sess.get(url, headers=agent) as resp:
 		logt(resp)
-		length = resp.headers.get('content-length')
-		logt("content length " + length)
-		tmp_name = path
-		if tmp_postfix:
-			tmp_name = path + tmp_postfix
-			logv("using stage file " + tmp_name)
+		file_name = path
+		length = None
+		file_length = None
+		file_mode = None
+		if mode == "file":
+			file_mode = "wb"
+			length = int(resp.headers.get('content-length'))
+			logt("content length " + str(length))
+			if tmp_postfix:
+				file_name = path + tmp_postfix
+				logv("using stage file " + file_name)
+		elif mode == "stream":
+			file_mode = "ab"
+		else:
+			raise Exception("fetch: unknown mode " + mode)
 
-		with open(tmp_name, "wb") as f:
+		with open(file_name, file_mode) as f:
 			while True:
-				chunk = await resp.content.read(0x1000)
+				chunk = await resp.content.readany()
 				# https://stackoverflow.com/questions/56346811/response-payload-is-not-completed-using-asyncio-aiohttp
-				await asyncio.sleep(0)
+				# await asyncio.sleep(0)
 				if not chunk:
-					logt("EOF")
+					file_length = f.tell()
+					logt("EOF with file length " + str(file_length))
 					break
 				if 5 <= log_level:
 					print(end = '*', flush = True)
 				# logt("fetching " + str(f.tell()))
 				f.write(chunk)
 
-		if tmp_postfix:
-			logv("move " + tmp_name + " to " + path)
-			os.replace(tmp_name, path)
+		if mode == "file":
+			if file_length != length:
+				logw("file " + file_name + " size mismatch, expect " + str(length) + " got " + str(file_length))
+				raise Exception("size mismatch " + path)
+
+			if tmp_postfix:
+				logv("move " + file_name + " to " + path)
+				os.replace(file_name, path)
+
+		return file_length
 

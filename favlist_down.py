@@ -100,7 +100,7 @@ async def main(args):
 		match = parser.fullmatch(v)
 		uid = match.group(1)
 		filter = match.group(2)
-		print(uid, filter)
+		util.logv(str(uid) + ' ' + str(filter))
 		try:
 			await dump_favlist(uid, filter, path = args.dest, mode = args.mode, credential = credential)
 		except Exception as e:
@@ -108,4 +108,4 @@ async def main(args):
 
 if __name__ == "__main__":
 	args = util.parse_args()
-	util.sync(main(args))
+	util.run(main(args))
