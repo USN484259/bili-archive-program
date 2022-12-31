@@ -22,7 +22,7 @@ stall_mutex = asyncio.Lock()
 stall_duration = 1
 stall_timestamp = 0
 
-tmp_postfix = None
+tmp_postfix = ".tmp"
 
 def do_log(level, msg):
 	if level <= log_level:
@@ -85,7 +85,7 @@ def parse_args():
 	parser.add_argument("-t", "--stall")
 	parser.add_argument("-v", "--verbose", action = "count", default = 0)
 	parser.add_argument("-q", "--quiet", action = "count", default = 0)
-	parser.add_argument("-s", "--stage", action = "store_true")
+	parser.add_argument("-r", "--direct", action = "store_true")
 
 	args = parser.parse_args()
 
@@ -95,8 +95,8 @@ def parse_args():
 		stall_duration = int(args.stall)
 	stall_timestamp = time.monotonic_ns()
 
-	if args.stage:
-		tmp_postfix = ".tmp"
+	if args.direct:
+		tmp_postfix = None
 
 	logt(args)
 	return args
