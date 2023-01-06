@@ -3,7 +3,6 @@
 import os
 import time
 import asyncio
-import aiohttp
 import re
 import json
 from bilibili_api import live, user
@@ -15,7 +14,7 @@ async def do_record(room, path, resolution):
 	info = await room.get_room_play_url(resolution)
 	util.logt(info)
 	url = info.get("durl")[0].get("url")
-	async with aiohttp.ClientSession() as sess:
+	async with util.session() as sess:
 		await util.fetch(sess, url, path, mode = "stream")
 
 

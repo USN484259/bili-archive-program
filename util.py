@@ -15,6 +15,19 @@ agent = {
 	"Referer": "https://www.bilibili.com/"
 }
 
+sec_to_ns = 1000 * 1000 * 1000
+
+unit_table = {
+	'b': 1,
+	'B': 1,
+	'k': 1000,
+	'K': 0x400,
+	'm': 1000 * 1000,
+	'M': 0x100000,
+	'g': 1000 * 1000 * 1000,
+	'G': 0x40000000
+}
+
 log_prefix = ["FATAL", "ERROR", "WARNING", "INFO", "VERBOSE", "TRACE"]
 log_level = 3
 
@@ -22,7 +35,10 @@ stall_mutex = asyncio.Lock()
 stall_duration = 1
 stall_timestamp = 0
 
+bandwidth_limit = None
+
 tmp_postfix = ".tmp"
+
 
 def do_log(level, msg):
 	if level <= log_level:
@@ -50,16 +66,16 @@ def logf(msg):
 async def stall():
 	global stall_mutex
 	global stall_timestamp
-	ratio_ns = 1000 * 1000 * 1000
 
 	async with stall_mutex:
 		timestamp = time.monotonic_ns()
 		time_diff = timestamp - stall_timestamp
-		stall_timestamp = timestamp
-		time_wait = stall_duration * ratio_ns - time_diff
+		time_wait = stall_duration * sec_to_ns - time_diff
 		logv("stall " + str(max(time_wait, 0)) + "ns")
 		if time_diff > 0 and time_wait > 0:
-			await asyncio.sleep(time_wait / ratio_ns)
+			await asyncio.sleep(time_wait / sec_to_ns)
+			timestamp = time.monotonic_ns()
+		stall_timestamp = timestamp
 
 
 def mkdir(path):
@@ -75,6 +91,7 @@ def parse_args():
 	global log_level
 	global stall_duration
 	global stall_timestamp
+	global bandwidth_limit
 	global tmp_postfix
 
 	parser = argparse.ArgumentParser()
@@ -86,6 +103,7 @@ def parse_args():
 	parser.add_argument("-v", "--verbose", action = "count", default = 0)
 	parser.add_argument("-q", "--quiet", action = "count", default = 0)
 	parser.add_argument("-r", "--direct", action = "store_true")
+	parser.add_argument("-w", "--bandwidth")
 
 	args = parser.parse_args()
 
@@ -94,6 +112,10 @@ def parse_args():
 	if args.stall:
 		stall_duration = int(args.stall)
 	stall_timestamp = time.monotonic_ns()
+
+	if args.bandwidth:
+		match = re.fullmatch(r"(\d+)([bBkKmMgG]?)", args.bandwidth)
+		bandwidth_limit = int(match.group(1)) * unit_table.get(match.group(2), 'b')
 
 	if args.direct:
 		tmp_postfix = None
@@ -152,10 +174,18 @@ async def save_json(obj, path):
 		os.replace(tmp_name, path)
 
 
+class session(aiohttp.ClientSession):
+	def __init__(self):
+		super(session, self).__init__(timeout = aiohttp.ClientTimeout())
+
+
 async def fetch(sess, url, path, mode = "file"):
 	logt("fetching " + url + " into " + path)
 	async with sess.get(url, headers=agent) as resp:
 		logt(resp)
+		if not resp.ok:
+			raise Exception("HTTP " + str(resp.status) + '\t' + resp.reason)
+
 		file_name = path
 		length = None
 		file_length = None
@@ -173,6 +203,10 @@ async def fetch(sess, url, path, mode = "file"):
 			raise Exception("fetch: unknown mode " + mode)
 
 		with open(file_name, file_mode) as f:
+			if mode == "file" and bandwidth_limit:
+				logv("bandwidth limit " + str(bandwidth_limit) + " byte/sec")
+				last_timestamp = time.monotonic_ns()
+
 			while True:
 				chunk = await resp.content.readany()
 				# https://stackoverflow.com/questions/56346811/response-payload-is-not-completed-using-asyncio-aiohttp
@@ -185,6 +219,18 @@ async def fetch(sess, url, path, mode = "file"):
 					print(end = '*', flush = True)
 				# logt("fetching " + str(f.tell()))
 				f.write(chunk)
+
+				if mode == "file" and bandwidth_limit:
+					cur_timestamp = time.monotonic_ns()
+					time_diff = cur_timestamp - last_timestamp
+					expect_time = sec_to_ns * len(chunk) / bandwidth_limit
+					time_wait = expect_time - time_diff
+					if time_diff > 0 and time_wait > 0:
+						logt('|' + str(time_wait) + "ns")
+						await asyncio.sleep(time_wait / sec_to_ns)
+						cur_timestamp = time.monotonic_ns()
+					last_timestamp = cur_timestamp
+
 
 		if mode == "file":
 			if file_length != length:

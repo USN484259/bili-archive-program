@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import os
-import aiohttp
 from bilibili_api import video
 import util
 
@@ -39,7 +38,7 @@ async def download(bv, path = None, credential = None, mode = None):
 	util.mkdir(path + bv)
 	util.logi("downloading " + bv + '\t' + info.get("title", ""))
 
-	async with aiohttp.ClientSession() as sess:
+	async with util.session() as sess:
 		util.logv("fetch video cover")
 		await util.fetch(sess, info.get("pic"), path + bv + os.path.sep + "cover.jpg")
 
@@ -54,6 +53,21 @@ async def download(bv, path = None, credential = None, mode = None):
 	await util.save_json(info, path + bv + os.path.sep + "info.json")
 
 	util.logv("finished " + bv)
+
+
+async def fetch_media(sess, url_info, path, key_name = "base_url"):
+	url_list = [
+		url_info.get(key_name)
+	] + url_info.get("backup_url")
+	util.logt(url_list)
+
+	for i, url in enumerate(url_list):
+		try:
+			await util.fetch(sess, url, path)
+			return
+		except Exception as e:
+			util.handle_exception(e, "failed to fetch media")
+			util.logw("URL failed " + str(i + 1) + '/' + str(len(url_list)))
 
 
 async def download_part(sess, url, path, mode):
@@ -77,17 +91,16 @@ async def download_part(sess, url, path, mode):
 		video_file = path + str(best_video.get("id")) + ".m4v"
 
 		if mode == "force" or not os.path.exists(audio_file):
-			await util.fetch(sess, best_audio.get("base_url"), audio_file)
+			await fetch_media(sess, best_audio, audio_file)
 
 		if mode == "force" or not os.path.exists(video_file):
-			await util.fetch(sess, best_video.get("base_url"), video_file)
+			await fetch_media(sess, best_video, video_file)
 
 	elif "durl" in url:
 		util.logw("unusual video without 'dash' instance, try 'durl'")
-		durl = url.get("durl")[0].get("url")
 		video_file = path + "video.flv"
 		if mode == "force" or not os.path.exists(video_file):
-			await util.fetch(sess, durl, video_file)
+			await fetch_media(sess, url.get("durl")[0], video_file, key_name = "url")
 
 	else:
 		raise Exception("unknown URL format")

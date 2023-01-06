@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import os
-import aiohttp
 from bilibili_api import user
 import util
 import bv_down
@@ -19,7 +18,7 @@ async def download(uid, path = None, credential = None):
 	util.mkdir(path + str(uid))
 	util.logi("downloading " + str(uid) + '\t' + info.get("name", ""))
 
-	async with aiohttp.ClientSession() as sess:
+	async with util.session() as sess:
 		util.logv("fetching head pic")
 		await util.fetch(sess, info.get("face"), path + str(uid) + os.path.sep + "head.jpg")
 
