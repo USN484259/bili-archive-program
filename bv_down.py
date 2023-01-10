@@ -69,6 +69,7 @@ async def fetch_media(sess, url_info, path, key_name = "base_url"):
 			util.handle_exception(e, "failed to fetch media")
 			util.logw("URL failed " + str(i + 1) + '/' + str(len(url_list)))
 
+	raise Exception("no valid URL")
 
 async def download_part(sess, url, path, mode):
 	path = util.opt_path(path)

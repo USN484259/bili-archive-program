@@ -40,27 +40,31 @@ bandwidth_limit = None
 tmp_postfix = ".tmp"
 
 
-def do_log(level, msg):
-	if level <= log_level:
-		print(log_prefix[level], msg, sep = '\t', flush = True)
+def do_log(level, raw, *msg):
+	if level > log_level:
+		return
+	if raw:
+		print(*msg, sep = '\t', end = "", flush = True)
+	else:
+		print(time.strftime("%y-%m-%d %H:%M:%S"), log_prefix[level], *msg, sep = '\t', flush = True)
 
-def logt(msg):
-	do_log(5, msg)
+def logt(*msg, raw = False):
+	do_log(5, raw, *msg)
 
-def logv(msg):
-	do_log(4, msg)
+def logv(*msg, raw = False):
+	do_log(4, raw, *msg)
 
-def logi(msg):
-	do_log(3, msg)
+def logi(*msg, raw = False):
+	do_log(3, raw, *msg)
 
-def logw(msg):
-	do_log(2, msg)
+def logw(*msg, raw = False):
+	do_log(2, raw, *msg)
 
-def loge(msg):
-	do_log(1, msg)
+def loge(*msg, raw = False):
+	do_log(1, raw, *msg)
 
-def logf(msg):
-	do_log(0, msg)
+def logf(*msg, raw = False):
+	do_log(0, raw, *msg)
 
 
 async def stall():
@@ -209,15 +213,12 @@ async def fetch(sess, url, path, mode = "file"):
 
 			while True:
 				chunk = await resp.content.readany()
-				# https://stackoverflow.com/questions/56346811/response-payload-is-not-completed-using-asyncio-aiohttp
-				# await asyncio.sleep(0)
 				if not chunk:
 					file_length = f.tell()
 					logt("EOF with file length " + str(file_length))
 					break
-				if 5 <= log_level:
-					print(end = '*', flush = True)
-				# logt("fetching " + str(f.tell()))
+
+				logt('*', raw = True)
 				f.write(chunk)
 
 				if mode == "file" and bandwidth_limit:
@@ -226,7 +227,7 @@ async def fetch(sess, url, path, mode = "file"):
 					expect_time = sec_to_ns * len(chunk) / bandwidth_limit
 					time_wait = expect_time - time_diff
 					if time_diff > 0 and time_wait > 0:
-						logt('|' + str(time_wait) + "ns")
+						logt('<' + str(time_wait) + "ns>", raw = True)
 						await asyncio.sleep(time_wait / sec_to_ns)
 						cur_timestamp = time.monotonic_ns()
 					last_timestamp = cur_timestamp
@@ -234,7 +235,7 @@ async def fetch(sess, url, path, mode = "file"):
 
 		if mode == "file":
 			if file_length != length:
-				logw("file " + file_name + " size mismatch, expect " + str(length) + " got " + str(file_length))
+				logw(file_name, "size mismatch, expect " + str(length) + " got " + str(file_length))
 				raise Exception("size mismatch " + path)
 
 			if tmp_postfix:
