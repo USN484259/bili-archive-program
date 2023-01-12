@@ -89,7 +89,7 @@ async def monitor(rid, path = None, interval = 60, credential = None, schedule =
 					if match_schedule(schedule, tm):
 						usr = user.User(play_info.get("uid"))
 						user_info = await usr.get_user_info()
-						rec_name = user_info.get("name") + '_' + room_info.get("room_info").get("title") + '_' + strftime("%y_%m_%d_%H_%M", tm) + ".flv"
+						rec_name = user_info.get("name") + '_' + room_info.get("room_info").get("title") + '_' + time.strftime("%y_%m_%d_%H_%M", tm) + ".flv"
 						state = "record"
 						util.logv("schedule matched, start recording")
 					else:
