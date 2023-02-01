@@ -3,12 +3,12 @@ import os
 import re
 import time
 import asyncio
-import aiohttp
+import httpx
 import traceback
 import argparse
 import json
+import bilibili_api
 from bilibili_api import Credential
-from bilibili_api import exceptions as bexp
 
 agent = {
 	"User-Agent": "Mozilla/5.0",
@@ -91,6 +91,16 @@ def mkdir(path):
 		pass
 
 
+def list_bv(path):
+	bv_pattern = re.compile(r"BV\w+")
+	bv_list = []
+	for f in os.listdir(path):
+		if bv_pattern.fullmatch(f):
+			bv_list.append(f)
+
+	return bv_list
+
+
 def parse_args():
 	global log_level
 	global stall_duration
@@ -106,7 +116,6 @@ def parse_args():
 	parser.add_argument("-t", "--stall")
 	parser.add_argument("-v", "--verbose", action = "count", default = 0)
 	parser.add_argument("-q", "--quiet", action = "count", default = 0)
-	parser.add_argument("-r", "--direct", action = "store_true")
 	parser.add_argument("-w", "--bandwidth")
 
 	args = parser.parse_args()
@@ -120,9 +129,6 @@ def parse_args():
 	if args.bandwidth:
 		match = re.fullmatch(r"(\d+)([bBkKmMgG]?)", args.bandwidth)
 		bandwidth_limit = int(match.group(1)) * unit_table.get(match.group(2), 'b')
-
-	if args.direct:
-		tmp_postfix = None
 
 	logt(args)
 	return args
@@ -140,7 +146,7 @@ def opt_path(path):
 def handle_exception(e, msg):
 	traceback.print_exc()
 	loge(msg + '\n', raw = True)
-	if e is bexp.NetworkException and e.status == 412:
+	if e is bilibili_api.exceptions.NetworkException and e.status == 412:
 		logf("encounter flow control, rethrow")
 		raise
 
@@ -163,7 +169,7 @@ def credential(auth_file):
 	return Credential(**info)
 
 
-async def save_json(obj, path):
+def save_json(obj, path):
 	logt("saving json " + path)
 	tmp_name = path
 	if tmp_postfix:
@@ -178,17 +184,12 @@ async def save_json(obj, path):
 		os.replace(tmp_name, path)
 
 
-class session(aiohttp.ClientSession):
-	def __init__(self):
-		super(session, self).__init__(timeout = aiohttp.ClientTimeout())
-
-
-async def fetch(sess, url, path, mode = "file"):
+async def fetch(url, path, mode = "file"):
+	sess = bilibili_api.get_session()
 	logt("fetching " + url + " into " + path)
-	async with sess.get(url, headers=agent) as resp:
+	async with sess.stream("GET", url, headers=agent) as resp:
 		logt(resp)
-		if not resp.ok:
-			raise Exception("HTTP " + str(resp.status) + '\t' + resp.reason)
+		resp.raise_for_status()
 
 		file_name = path
 		length = None
@@ -211,13 +212,7 @@ async def fetch(sess, url, path, mode = "file"):
 				logv("bandwidth limit " + str(bandwidth_limit) + " byte/sec")
 				last_timestamp = time.monotonic_ns()
 
-			while True:
-				chunk = await resp.content.readany()
-				if not chunk:
-					file_length = f.tell()
-					logt("EOF with file length " + str(file_length))
-					break
-
+			async for chunk in resp.aiter_bytes():
 				logt('*', raw = True)
 				f.write(chunk)
 
@@ -232,15 +227,17 @@ async def fetch(sess, url, path, mode = "file"):
 						cur_timestamp = time.monotonic_ns()
 					last_timestamp = cur_timestamp
 
+			file_length = f.tell()
+			logt("EOF with file length " + str(file_length))
 
-		if mode == "file":
-			if file_length != length:
-				logw(file_name, "size mismatch, expect " + str(length) + " got " + str(file_length))
-				raise Exception("size mismatch " + path)
+	if mode == "file":
+		if file_length != length:
+			logw(file_name, "size mismatch, expect " + str(length) + " got " + str(file_length))
+			raise Exception("size mismatch " + path)
 
-			if tmp_postfix:
-				logv("move " + file_name + " to " + path)
-				os.replace(file_name, path)
+		if tmp_postfix:
+			logv("move " + file_name + " to " + path)
+			os.replace(file_name, path)
 
-		return file_length
+	return file_length
 

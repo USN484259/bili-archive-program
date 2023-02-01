@@ -7,8 +7,6 @@ import json
 import shutil
 import subprocess
 
-bv_pattern = re.compile(r"(.*)\.m4(.?)")
-
 ffprobe_path = shutil.which("ffprobe")
 ffprobe_options = [
 	"-hide_banner",
@@ -73,6 +71,11 @@ def verify_bv(bv, path = None, check_media = False):
 			util.logi(part_name, part_info.get("part"), str(part_duration) + " sec")
 
 			part_root = bv_root + part_name + os.path.sep
+
+			if not os.path.isdir(part_root):
+				util.logv("part dir not exist")
+				continue
+
 			video_count = 0
 			audio_count = 0
 
@@ -80,6 +83,10 @@ def verify_bv(bv, path = None, check_media = False):
 			for f in os.listdir(part_root):
 				util.logv("file " + f)
 				if check_media:
+					if os.path.splitext(f)[1] == util.tmp_postfix:
+						util.logv("skip tmp file")
+						continue
+
 					media_info = ffprobe(part_root + f)
 					try:
 						media_vc = 0
@@ -89,7 +96,7 @@ def verify_bv(bv, path = None, check_media = False):
 							media_duration = float(media.get("duration"))
 							util.logv("stream " + str(media.get("index")), "type " + media_type, "duration " + str(media_duration))
 
-							if abs(part_duration - media_duration) >= 1:
+							if abs(part_duration - media_duration) >= 2:
 								util.logw("media duration mismatch, skipping", f)
 								util.logv("duration",  '(' + str(part_duration) + '/' + str(media_duration) + ')')
 								break
@@ -104,20 +111,20 @@ def verify_bv(bv, path = None, check_media = False):
 					except:
 						pass
 				else:
-					match = bv_pattern.fullmatch(f)
-					if not match:
-						util.logv("name not match")
-						continue
+					ext = os.path.splitext(f)[1].lower()
 
-					file_type = match.group(2).lower()
-					if file_type == 'v':
+					if ext == '.m4v':
 						util.logv("type: video")
 						video_count = video_count + 1
-					elif file_type == 'a':
+					elif ext == '.m4a':
 						util.logv("type: audio")
 						audio_count = audio_count + 1
+					elif ext == ".flv":
+						util.logv("type: flv")
+						video_count = video_count + 1
+						audio_count = audio_count + 1
 					else:
-						util.logv("unknown type " + file_type)
+						util.logv("unknown type " + ext)
 
 			util.logv("video count " + str(video_count), "audio_count " + str(audio_count))
 			if video_count > 0 and audio_count > 0:
@@ -137,12 +144,7 @@ def main(args):
 		bv_list = args.inputs
 	else:
 		util.logv("scan BV in " + (args.dest or "(cwd)"))
-		bv_list = []
-		bv_pattern = re.compile(r"BV\w+")
-		for f in os.listdir(args.dest):
-			util.logt(f)
-			if bv_pattern.fullmatch(f):
-				bv_list.append(f)
+		bv_list = util.list_bv(args.dest)
 
 	util.logi("BV count " + str(len(bv_list)), "mode " + str(args.mode))
 	util.logt(bv_list)
@@ -155,7 +157,7 @@ def main(args):
 				res = False
 				break
 
-		print(bv, res)
+		print(bv, res, flush = True)
 
 if __name__ == "__main__":
 	args = util.parse_args()
