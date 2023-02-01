@@ -44,9 +44,9 @@ def do_log(level, raw, *msg):
 	if level > log_level:
 		return
 	if raw:
-		print(*msg, sep = '\t', end = "", flush = True)
+		print(*msg, file = sys.stderr, sep = '\t', end = "", flush = True)
 	else:
-		print(time.strftime("%y-%m-%d %H:%M:%S"), log_prefix[level], *msg, sep = '\t', flush = True)
+		print(time.strftime("%y-%m-%d %H:%M:%S"), log_prefix[level], *msg, file = sys.stderr, sep = '\t', flush = True)
 
 def logt(*msg, raw = False):
 	do_log(5, raw, *msg)
@@ -99,7 +99,7 @@ def parse_args():
 	global tmp_postfix
 
 	parser = argparse.ArgumentParser()
-	parser.add_argument("inputs", nargs = '+')
+	parser.add_argument("inputs", nargs = '*')
 	parser.add_argument("-d", "--dest")
 	parser.add_argument("-m", "--mode")
 	parser.add_argument("-u", "--auth")
@@ -139,7 +139,7 @@ def opt_path(path):
 
 def handle_exception(e, msg):
 	traceback.print_exc()
-	print(msg, file = sys.stderr, flush = True)
+	loge(msg + '\n', raw = True)
 	if e is bexp.NetworkException and e.status == 412:
 		logf("encounter flow control, rethrow")
 		raise
