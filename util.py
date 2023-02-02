@@ -38,7 +38,7 @@ stall_timestamp = 0
 bandwidth_limit = None
 
 tmp_postfix = ".tmp"
-
+noaudio_stub = ".noaudio"
 
 def do_log(level, raw, *msg):
 	if level > log_level:
@@ -89,6 +89,11 @@ def mkdir(path):
 	except FileExistsError:
 		logt("exist" + path)
 		pass
+
+
+def touch(path):
+	logv("touch " + path)
+	open(path, "a").close()
 
 
 def list_bv(path):
@@ -220,9 +225,9 @@ async def fetch(url, path, mode = "file"):
 					cur_timestamp = time.monotonic_ns()
 					time_diff = cur_timestamp - last_timestamp
 					expect_time = sec_to_ns * len(chunk) / bandwidth_limit
-					time_wait = expect_time - time_diff
+					time_wait = int(expect_time - time_diff)
 					if time_diff > 0 and time_wait > 0:
-						logt('<' + str(time_wait) + "ns>", raw = True)
+						logt('<' + str(time_wait) + '>', raw = True)
 						await asyncio.sleep(time_wait / sec_to_ns)
 						cur_timestamp = time.monotonic_ns()
 					last_timestamp = cur_timestamp

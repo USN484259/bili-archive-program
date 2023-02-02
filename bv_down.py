@@ -20,9 +20,12 @@ def find_best(res_list):
 		"id": 0
 	}
 	for k, v in enumerate(res_list):
-		util.logt("quality " + str(v.get("id")))
-		if v.get("id") > result.get("id"):
-			result = v
+		util.logt("quality " + str(v.get("id")), "codec " + str(v.get("codecid")))
+		if v.get("id") < result.get("id"):
+			continue
+		elif v.get("id") == result.get("id") and v.get("codecid") <= result.get("codecid"):
+			continue
+		result = v
 	return result
 
 
@@ -35,12 +38,13 @@ async def fetch_media(url_info, path, key_name):
 	for i, url in enumerate(url_list):
 		try:
 			await util.fetch(url, path)
-			return
+			return True
 		except Exception as e:
 			util.handle_exception(e, "failed to fetch media")
 			util.logw("URL failed " + str(i + 1) + '/' + str(len(url_list)))
 
 	util.loge("no valid URL (0/" + str(len(url_list)) + ')')
+	return False
 
 
 async def download_part(v, part_num, path, force):
@@ -51,37 +55,45 @@ async def download_part(v, part_num, path, force):
 	url = await v.get_download_url(part_num - 1)
 	util.logt(url)
 
+	result = None
 	if "dash" in url:
 		dash = url.get("dash")
-		best_audio = find_best(dash.get("audio"))
-		util.logv("audio quality " + str(best_audio.get("id")))
 
 		best_video = find_best(dash.get("video"))
-		util.logv("video quality " + str(best_video.get("id")))
-
-		audio_file = part_path + str(best_audio.get("id")) + ".m4a"
+		util.logv("video quality " + str(best_video.get("id")), "codec " + best_video.get("codecs"))
 		video_file = part_path + str(best_video.get("id")) + ".m4v"
-
-		if force or not os.path.exists(audio_file):
-			util.logv("fetch audio")
-			await fetch_media(best_audio, audio_file, "base_url")
-		else:
-			util.logv("skip audio")
 
 		if force or not os.path.exists(video_file):
 			util.logv("fetch video")
-			await fetch_media(best_video, video_file, "base_url")
+			result = await fetch_media(best_video, video_file, "base_url")
 		else:
 			util.logv("skip video")
+
+		if dash.get("audio", None):
+			best_audio = find_best(dash.get("audio"))
+			util.logv("audio quality " + str(best_audio.get("id")), "codec " + best_audio.get("codecs"))
+			audio_file = part_path + str(best_audio.get("id")) + ".m4a"
+
+			if force or not os.path.exists(audio_file):
+				util.logv("fetch audio")
+				result = await fetch_media(best_audio, audio_file, "base_url") and result
+			else:
+				util.logv("skip audio")
+		else:
+			util.logw("no audio")
+			util.touch(part_path + util.noaudio_stub)
+
 
 	elif "durl" in url:
 		util.logw("unusual video without 'dash' instance, try 'durl'")
 		video_file = part_path + "video.flv"
 		if force or not os.path.exists(video_file):
-			await fetch_media(url.get("durl")[0], video_file, "url")
+			result = await fetch_media(url.get("durl")[0], video_file, "url")
 
 	else:
 		raise Exception("unknown URL format")
+
+	return result
 
 
 async def do_fix(bv, path, credential):
@@ -160,7 +172,9 @@ async def do_update(bv, path, credential, force_mode):
 	util.logv("fetch video cover")
 	await util.fetch(info.get("pic"), bv_root + "cover.jpg")
 
-	for i in range(info.get("videos")):
+	total_parts = info.get("videos")
+	finished_parts = 0
+	for i in range(total_parts):
 		part_info = info.get("pages")[i]
 		util.logi("downloading P" + str(i + 1), part_info.get("part"))
 
@@ -176,9 +190,11 @@ async def do_update(bv, path, credential, force_mode):
 			except Exception as e:
 				util.handle_exception(e, "exception when checking part cid")
 
-		await download_part(v, i + 1, bv_root, force)
+		if await download_part(v, i + 1, bv_root, force):
+			finished_parts = finished_parts + 1
 
-	util.logi("finished " + bv)
+	util.logi("finished " + bv, "part " + str(finished_parts) + '/' + str(total_parts))
+	return finished_parts == total_parts
 
 
 async def download(bv, path = None, credential = None, mode = None):
@@ -191,11 +207,11 @@ async def download(bv, path = None, credential = None, mode = None):
 
 	try:
 		if mode != "fix" or not os.path.isfile(path + bv + os.path.sep + "info.json"):
-			await do_update(bv, path, credential, mode == "force")
+			return await do_update(bv, path, credential, mode == "force")
 		else:
 			await do_fix(bv, path, credential)
+			return True
 
-		return True
 	except Exception as e:
 		util.handle_exception(e, "failed to download " + bv)
 		return False

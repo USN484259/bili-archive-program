@@ -45,7 +45,7 @@ async def download(mid, path = None, credential = None):
 
 async def dump_favlist(uid, filter = None, path = None, credential = None, mode = None):
 	if not mode:
-		mode = "check"
+		mode = "fix"
 
 	path = util.opt_path(path)
 

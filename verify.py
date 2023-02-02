@@ -78,14 +78,21 @@ def verify_bv(bv, path = None, check_media = False):
 
 			video_count = 0
 			audio_count = 0
+			no_audio = False
 
 			util.logv("checking " + part_name + " in " + part_root)
 			for f in os.listdir(part_root):
 				util.logv("file " + f)
+				if f == util.noaudio_stub:
+					util.logw("found no-audio stub")
+					no_audio = True
+					continue
+
 				if check_media:
 					if os.path.splitext(f)[1] == util.tmp_postfix:
 						util.logv("skip tmp file")
 						continue
+
 
 					media_info = ffprobe(part_root + f)
 					try:
@@ -127,7 +134,7 @@ def verify_bv(bv, path = None, check_media = False):
 						util.logv("unknown type " + ext)
 
 			util.logv("video count " + str(video_count), "audio_count " + str(audio_count))
-			if video_count > 0 and audio_count > 0:
+			if video_count > 0 and (no_audio or audio_count > 0):
 				result[part_name] = True
 
 		util.logv("verify done " + bv)

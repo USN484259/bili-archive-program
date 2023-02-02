@@ -18,16 +18,15 @@ async def download(uid, path = None, credential = None):
 	util.mkdir(path + str(uid))
 	util.logi("downloading " + str(uid) + '\t' + info.get("name", ""))
 
-	async with util.session() as sess:
-		util.logv("fetching head pic")
-		await util.fetch(sess, info.get("face"), path + str(uid) + os.path.sep + "head.jpg")
+	util.logv("fetching head pic")
+	await util.fetch(info.get("face"), path + str(uid) + os.path.sep + "head.jpg")
 
-		util.logv("fetching top banner")
-		await util.fetch(sess, info.get("top_photo"), path + str(uid) + os.path.sep + "banner.jpg")
+	util.logv("fetching top banner")
+	await util.fetch(info.get("top_photo"), path + str(uid) + os.path.sep + "banner.jpg")
 
-		if info.get("pendant").get("pid") > 0:
-			util.logv("fetching pendant")
-			await util.fetch(sess, info.get("pendant").get("image"), path + str(uid) + os.path.sep + "pendant.png")
+	if info.get("pendant").get("pid") > 0:
+		util.logv("fetching pendant")
+		await util.fetch(info.get("pendant").get("image"), path + str(uid) + os.path.sep + "pendant.png")
 
 
 	page_index = 1
@@ -62,7 +61,7 @@ async def download(uid, path = None, credential = None):
 
 async def dump_user(uid_list, path = None, credential = None, mode = None):
 	if not mode:
-		mode = "check"
+		mode = "fix"
 
 	path = util.opt_path(path)
 	

@@ -14,8 +14,7 @@ async def do_record(room, path, resolution):
 	info = await room.get_room_play_url(resolution)
 	util.logt(info)
 	url = info.get("durl")[0].get("url")
-	async with util.session() as sess:
-		await util.fetch(sess, url, path, mode = "stream")
+	await util.fetch(url, path, mode = "stream")
 
 
 async def record(rid, path, credential = None, resolution = live.ScreenResolution.ORIGINAL):
