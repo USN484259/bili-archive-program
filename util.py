@@ -106,7 +106,7 @@ def list_bv(path):
 	return bv_list
 
 
-def parse_args():
+def parse_args(arg_list = []):
 	global log_level
 	global stall_duration
 	global stall_timestamp
@@ -116,12 +116,15 @@ def parse_args():
 	parser = argparse.ArgumentParser()
 	parser.add_argument("inputs", nargs = '*')
 	parser.add_argument("-d", "--dest")
-	parser.add_argument("-m", "--mode")
+	parser.add_argument("-m", "--mode", choices = ["fix", "update", "force"])
 	parser.add_argument("-u", "--auth")
 	parser.add_argument("-t", "--stall")
 	parser.add_argument("-v", "--verbose", action = "count", default = 0)
 	parser.add_argument("-q", "--quiet", action = "count", default = 0)
 	parser.add_argument("-w", "--bandwidth")
+
+	for args, kwargs in arg_list:
+		parser.add_argument(*args, **kwargs)
 
 	args = parser.parse_args()
 
@@ -171,11 +174,15 @@ def credential(auth_file):
 				logt("got key " + match.group(1))
 				info[match.group(1)] = match.group(2)
 
-	return Credential(**info)
+	credential = Credential(**info)
+	if not credential.check_valid():
+		raise Exception("bad Credential")
+
+	return credential
 
 
 def save_json(obj, path):
-	logt("saving json " + path)
+	logv("saving json " + path)
 	tmp_name = path
 	if tmp_postfix:
 		tmp_name = path + tmp_postfix
@@ -202,8 +209,13 @@ async def fetch(url, path, mode = "file"):
 		file_mode = None
 		if mode == "file":
 			file_mode = "wb"
-			length = int(resp.headers.get('content-length'))
-			logt("content length " + str(length))
+			length = resp.headers.get('content-length')
+			if length:
+				logt("content length " + length)
+				length = int(length)
+			else:
+				logw("missing content-length")
+
 			if tmp_postfix:
 				file_name = path + tmp_postfix
 				logv("using stage file " + file_name)
@@ -236,9 +248,10 @@ async def fetch(url, path, mode = "file"):
 			logt("EOF with file length " + str(file_length))
 
 	if mode == "file":
-		if file_length != length:
+		if length and file_length != length:
 			logw(file_name, "size mismatch, expect " + str(length) + " got " + str(file_length))
-			raise Exception("size mismatch " + path)
+			if length > file_length:
+				raise Exception("unexpected EOF " + path)
 
 		if tmp_postfix:
 			logv("move " + file_name + " to " + path)
