@@ -79,44 +79,55 @@ def verify_bv(bv, path = None, scan_files = False):
 		bv_root = util.opt_path(path) + bv + os.path.sep
 		util.logv("verify video " + bv, "path " + bv_root, "scan_files " + str(scan_files))
 
+		util.logv("loading video info")
 		with open(bv_root + "info.json") as f:
 			bv_info = json.load(f)
 			util.logt(bv_info)
 
 		util.logi(bv, bv_info.get("title"))
 
+		for ext in [".jpg", ".png"]:
+			cover_file = bv_root + "cover" + ext
+			util.logv("checking cover " + cover_file)
+			if not os.path.isfile(cover_file):
+				continue
+			if scan_files:
+				media_info = ffprobe(cover_file)
+				try:
+					codec = media_info.get("streams")[0].get("codec_name")
+					util.logv("cover codec " + codec)
+					if codec not in ["mjpeg", "png"]:
+						continue
+				except Exception as e:
+					util.handle_exception("exception on verify cover for " + cover_file)
+					continue
 
-		if scan_files:
-			util.logv("checking cover")
-			media_info = ffprobe(bv_root + "cover.jpg")
-			try:
-				codec = media_info.get("streams")[0].get("codec_name")
-				util.logv("cover format " + codec)
-				if codec in ["mjpeg", "png"]:
-					result["cover"] = True
-			except:
-				pass
-
-		elif os.path.isfile(bv_root + "cover.jpg"):
-			util.logv("cover exists")
+			util.logv("found cover, format " + ext)
 			result["cover"] = True
+			break
+		else:
+			util.logw("cover not found")
 
 		for i in range(bv_info.get("videos")):
-			part_name = 'P' + str(i + 1)
-			danmaku_name = 'D' + str(i + 1)
-			subtitle_name = 'S' + str(i + 1)
-			result[part_name] = False
+			part_info = bv_info.get("pages")[i]
+			part_cid = part_info.get("cid")
+			part_duration = part_info.get("duration")
+
+			util.logi('P' + str(i + 1), "cid " + str(part_cid), part_info.get("part"), str(part_duration) + " sec")
+
+			video_name = "V:" + str(part_cid)
+			danmaku_name = "D:" + str(part_cid)
+			subtitle_name = "S:" + str(part_cid)
+			result[video_name] = False
 			result[danmaku_name] = False
 
-			subtitle = bv_info.get("subtitle")[i].get("subtitles")
+			subtitle = bv_info.get("subtitle")[str(part_cid)].get("subtitles")
+			util.logv("subtitle count " + str(len(subtitle)))
+			util.logt(subtitle)
 			if len(subtitle) > 0:
 				result[subtitle_name] = False
 
-			part_info = bv_info.get("pages")[i]
-			part_duration = part_info.get("duration")
-			util.logi(part_name, part_info.get("part"), str(part_duration) + " sec")
-
-			part_root = bv_root + part_name + os.path.sep
+			part_root = bv_root + str(part_cid) + os.path.sep
 
 			if not os.path.isdir(part_root):
 				util.logv("part dir not exist")
@@ -127,10 +138,9 @@ def verify_bv(bv, path = None, scan_files = False):
 			subtitle_count = 0
 			no_audio = False
 
-			util.logv("checking " + part_name + " in " + part_root)
+			util.logv("checking " + str(part_cid) + " in " + part_root)
 			for filename in os.listdir(part_root):
 				util.logv("file " + filename)
-
 				ext = os.path.splitext(filename)[1].lower()
 
 				if ext == util.tmp_postfix:
@@ -152,6 +162,7 @@ def verify_bv(bv, path = None, scan_files = False):
 							util.logw("unexpected XML format")
 							continue
 
+					util.logv("found danmaku")
 					result[danmaku_name] = True
 					continue
 
@@ -171,10 +182,11 @@ def verify_bv(bv, path = None, scan_files = False):
 							util.logw("unexpected JSON format")
 							continue
 
+					util.logv("found subtitle, lang " + lan)
 					for i, sub in enumerate(subtitle):
 						if sub.get("lan") == lan:
 							del subtitle[i]
-							subtitle_count = subtitle_count + 1
+							subtitle_count += 1
 							break
 					else:
 						util.logw("subtitle not recorded " + lan)
@@ -188,6 +200,8 @@ def verify_bv(bv, path = None, scan_files = False):
 						if vc != 1 or ac != 0:
 							util.logw("unexpected media streams")
 							continue
+
+					util.logv("found video")
 					video_count += 1
 					continue
 
@@ -199,6 +213,7 @@ def verify_bv(bv, path = None, scan_files = False):
 							util.logw("unexpected media streams")
 							continue
 
+					util.logv("found audio")
 					audio_count += 1
 					continue
 
@@ -210,6 +225,7 @@ def verify_bv(bv, path = None, scan_files = False):
 							util.logw("unexpected media streams")
 							continue
 
+					util.logv("found video & audio")
 					video_count += 1
 					audio_count += 1
 					continue
@@ -218,16 +234,25 @@ def verify_bv(bv, path = None, scan_files = False):
 
 			util.logv("video count " + str(video_count), "audio_count " + str(audio_count), "subtitle_count " + str(subtitle_count))
 			if video_count > 0 and (no_audio or audio_count > 0):
-				result[part_name] = True
+				result[video_name] = True
+			else:
+				util.logw("missing media files")
+
+			if not result[danmaku_name]:
+				util.logw("missing danmaku file")
+
 			if len(subtitle) == 0:
 				result[subtitle_name] = True
+			else:
+				util.logw("missing subtitle " + str(len(subtitle)) + '/' + str(subtitle_count))
+				util.logt(subtitle)
 
-		util.logv("verify done " + bv)
+		util.logv("verify done for " + bv)
 		result["info"] = True
 	except Exception as e:
 		util.handle_exception(e, "exception in verifing " + bv)
 
-	util.logv(result)
+	util.logi(result)
 	return result
 
 def main(args):

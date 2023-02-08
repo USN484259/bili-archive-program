@@ -74,7 +74,7 @@ async def stall():
 	async with stall_mutex:
 		timestamp = time.monotonic_ns()
 		time_diff = timestamp - stall_timestamp
-		time_wait = stall_duration * sec_to_ns - time_diff
+		time_wait = int(stall_duration * sec_to_ns) - time_diff
 		logv("stall " + str(max(time_wait, 0)) + "ns")
 		if time_diff > 0 and time_wait > 0:
 			await asyncio.sleep(time_wait / sec_to_ns)
@@ -131,7 +131,7 @@ def parse_args(arg_list = []):
 	log_level = 3 - args.quiet + args.verbose
 
 	if args.stall:
-		stall_duration = int(args.stall)
+		stall_duration = float(args.stall)
 	stall_timestamp = time.monotonic_ns()
 
 	if args.bandwidth:
@@ -225,6 +225,7 @@ async def fetch(url, path, mode = "file"):
 			raise Exception("fetch: unknown mode " + mode)
 
 		with open(file_name, file_mode) as f:
+			last_timestamp = None
 			if mode == "file" and bandwidth_limit:
 				logv("bandwidth limit " + str(bandwidth_limit) + " byte/sec")
 				last_timestamp = time.monotonic_ns()
@@ -245,7 +246,7 @@ async def fetch(url, path, mode = "file"):
 					last_timestamp = cur_timestamp
 
 			file_length = f.tell()
-			logt("EOF with file length " + str(file_length))
+			logv("EOF with file length " + str(file_length))
 
 	if mode == "file":
 		if length and file_length != length:

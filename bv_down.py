@@ -7,7 +7,7 @@ from bilibili_api import video
 import util
 from verify import verify_bv
 
-part_pattern = re.compile(r"([PSD])(\d+)")
+part_pattern = re.compile(r"([VSD]):(\d+)")
 
 # mode		operation
 # ---------------------------------------------------
@@ -47,9 +47,10 @@ async def fetch_media(url_info, path, key_name):
 	return False
 
 
-async def download_part(v, part_num, path, force):
+async def download_part(v, cid, path, force):
+	util.logv("download part for " + str(cid), "path " + path, "force " + str(force))
 	await util.stall()
-	url = await v.get_download_url(part_num - 1)
+	url = await v.get_download_url(cid = cid)
 	util.logt(url)
 
 	result = None
@@ -94,12 +95,35 @@ async def download_part(v, part_num, path, force):
 	return result
 
 
-async def fetch_danmaku(v, part_num, path, force):
+async def fetch_cover(info, path, force):
+	util.logv("fetch video cover for " + info.get("bvid"), "path " + path, "force " + str(force))
+	try:
+		url = info.get("pic")
+		ext = os.path.splitext(url)[1]
+		if not ext or ext == "":
+			ext = ".jpg"
+
+		cover_file = path + "cover" + ext
+		if force or not os.path.isfile(cover_file):
+			await util.fetch(url, cover_file)
+		else:
+			util.logv("skip cover")
+
+		return True
+
+	except Exception as e:
+		util.handle_exception(e, "error on fetch cover")
+		return False
+
+
+async def fetch_danmaku(cid, path, force):
+	util.logv("fetch danmaku for " + str(cid), "path " + path, "force " + str(force))
 	try:
 		xml_file = path + "danmaku.xml"
 		if force or not os.path.isfile(xml_file):
-			cid = await v.get_cid(part_num - 1)
 			await util.fetch("https://comment.bilibili.com/" + str(cid) + ".xml", xml_file)
+		else:
+			util.logv("skip danmaku")
 
 		return True
 
@@ -108,14 +132,19 @@ async def fetch_danmaku(v, part_num, path, force):
 		return False
 
 
-async def fetch_subtitle(info, part_num, path, force):
+async def fetch_subtitle(info, cid, path, force):
+	util.logv("fetch subtitle for " + str(cid), "path " + path, "force " + str(force))
 	try:
-		subtitle = info.get("subtitle")[part_num - 1].get("subtitles")
+		subtitle = info.get("subtitle").get(str(cid))
 		util.logt(subtitle)
-		for i, sub in enumerate(subtitle):
-			subtitle_file = path + "subtitle." + sub.get("lan") + ".json"
+		for i, sub in enumerate(subtitle.get("subtitles")):
+			lan = sub.get("lan")
+			util.logv("subtitle lang " + lan)
+			subtitle_file = path + "subtitle." + lan + ".json"
 			if force or not os.path.isfile(subtitle_file):
 				await util.fetch("https:" + sub.get("subtitle_url"), subtitle_file)
+			else:
+				util.logv("skip subtitle " + lan)
 
 		return True
 
@@ -131,14 +160,14 @@ async def fetch_info(v):
 	util.logt(info)
 
 	try:
-		subtitle_list = []
+		subtitle_map = {}
 		for i in range(info.get("videos")):
 			cid = await v.get_cid(i)
 			subtitle = await v.get_subtitle(cid)
 			util.logt("P" + str(i + 1), cid, subtitle)
-			subtitle_list.append(subtitle)
+			subtitle_map[str(cid)] = subtitle
 
-		info["subtitle"] = subtitle_list
+		info["subtitle"] = subtitle_map
 
 	except Exception as e:
 		util.handle_exception("failed on fetching subtitle info " + v.get_bvid())
@@ -169,10 +198,8 @@ async def do_fix(bv, path, credential):
 				raise Exception("failed to fix " + bv)
 
 	if not stat.get("cover", False):
-		util.logv("fetch video cover")
 		info = info or await fetch_info(v)
-
-		await util.fetch(info.get("pic"), bv_root + "cover.jpg")
+		await fetch_cover(info, bv_root, True)
 
 	for k, r in stat.items():
 		if r:
@@ -181,22 +208,20 @@ async def do_fix(bv, path, credential):
 		match = part_pattern.fullmatch(k)
 		if not match:
 			continue
+
+		util.logv("fixing " + k)
 		t = match.group(1)
-		p = int(match.group(2))
+		cid = int(match.group(2))
 
-		part_root = bv_root + 'P' + str(p) + os.path.sep
+		part_root = bv_root + str(cid) + os.path.sep
 		util.mkdir(part_root)
-		if t == 'P':
-			util.logv("fetch video " + k)
-			await download_part(v, p, part_root, True)
+		if t == 'V':
+			await download_part(v, cid, part_root, True)
 		elif t == 'D':
-			util.logv("fetch danmaku " + k)
-			await fetch_danmaku(v, p, part_root, True)
+			await fetch_danmaku(cid, part_root, True)
 		elif t == 'S':
-			util.logv("fetch subtitle " + k)
 			info = info or await fetch_info(v)
-
-			await fetch_subtitle(info, p, part_root, True)
+			await fetch_subtitle(info, cid, part_root, True)
 
 	stat = verify_bv(bv, path)
 	for k, v in stat.items():
@@ -206,64 +231,45 @@ async def do_fix(bv, path, credential):
 	util.logi("fixed " + bv)
 
 
-async def do_update(bv, path, credential, force_mode):
+async def do_update(bv, path, credential, force):
 	bv_root = path + bv + os.path.sep
 	v = video.Video(bvid = bv, credential = credential)
 
+	util.logi("downloading " + bv, info.get("title", ""))
 	info = await fetch_info(v)
 
 	util.mkdir(bv_root)
-	util.logi("downloading " + bv, info.get("title", ""))
-
-	saved_info = None
-	if not force_mode:
-		try:
-			util.logv("checking saved info")
-			with open(bv_root + "info.json", "r") as f:
-				saved_info = json.load(f)
-				util.logt(saved_info)
-		except:
-			pass
-
 	util.logv("save video info")
 	util.save_json(info, bv_root + "info.json")
 
-	util.logv("fetch video cover")
-	await util.fetch(info.get("pic"), bv_root + "cover.jpg")
+	result = await fetch_cover(info, bv_root, force)
 
 	total_parts = info.get("videos")
 	finished_parts = 0
+	util.logv("video parts " + str(total_parts))
+
 	for i in range(total_parts):
 		part_info = info.get("pages")[i]
-		util.logi("downloading P" + str(i + 1), part_info.get("part"))
+		part_cid = part_info.get("cid")
+		util.logi("downloading P" + str(i + 1), str(part_cid), part_info.get("part"))
 
-		part_root = bv_root + 'P' + str(i + 1) + os.path.sep
+		part_root = bv_root + str(part_cid) + os.path.sep
 		util.mkdir(part_root)
 
-		force = force_mode
-		if saved_info:
-			try:
-				saved_cid = saved_info.get("pages")[i].get("cid")
-				cur_cid = part_info.get("cid")
-				if saved_cid != cur_cid:
-					util.logw("part cid mismatch, re-download")
-					util.logv("saved-cid " + str(saved_cid), "current-cid " + str(cur_cid))
-					force = True
-			except Exception as e:
-				util.handle_exception(e, "exception when checking part cid")
-
-		result = await download_part(v, i + 1, part_root, force)
+		result = await download_part(v, part_cid, part_root, force)
 
 		# always update danmaku
-		result = await fetch_danmaku(v, i + 1, part_root, True) and result
+		result = await fetch_danmaku(part_cid, part_root, True) and result
 
-		result = await fetch_subtitle(info, i + 1, part_root, force) and result
+		result = await fetch_subtitle(info, part_cid, part_root, force) and result
 
 		if result:
 			finished_parts = finished_parts + 1
+		else:
+			util.loge("error in downloading P" + str(i + 1))
 
 	util.logi("finished " + bv, "part " + str(finished_parts) + '/' + str(total_parts))
-	return finished_parts == total_parts
+	return result and (finished_parts == total_parts)
 
 
 async def download(bv, path = None, credential = None, mode = None):
