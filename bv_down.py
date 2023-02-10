@@ -3,10 +3,14 @@
 import os
 import re
 import json
+import shutil
+import subprocess
 from bilibili_api import video
 import util
 from verify import verify_bv
+from interactive import is_interactive, to_interactive, save_graph
 
+dot_bin = shutil.which("dot")
 part_pattern = re.compile(r"([VSD]):(\d+)")
 
 # mode		operation
@@ -53,7 +57,7 @@ async def download_part(v, cid, path, force):
 	url = await v.get_download_url(cid = cid)
 	util.logt(url)
 
-	result = None
+	result = True
 	if "dash" in url:
 		dash = url.get("dash")
 
@@ -158,21 +162,57 @@ async def fetch_info(v):
 	await util.stall()
 	info = await v.get_info()
 	util.logt(info)
+	part_list = None
 
-	try:
-		subtitle_map = {}
-		for i in range(info.get("videos")):
-			cid = await v.get_cid(i)
-			subtitle = await v.get_subtitle(cid)
-			util.logt("P" + str(i + 1), cid, subtitle)
-			subtitle_map[str(cid)] = subtitle
+	if is_interactive(info):
+		util.logw("detected interactive video")
+		iv_info = await to_interactive(v)
+		info["interactive"] = iv_info
+		part_list = iv_info.get("nodes")
+	else:
+		part_list = info.get("pages")
 
-		info["subtitle"] = subtitle_map
+	subtitle_map = {}
+	for part in part_list:
+		cid = part.get("cid")
+		await util.stall()
+		subtitle = await v.get_subtitle(cid)
+		util.logv("subtitle for " + str(cid), "count " + str(len(subtitle.get("subtitles"))))
+		util.logt(subtitle)
+		subtitle_map[str(cid)] = subtitle
 
-	except Exception as e:
-		util.handle_exception("failed on fetching subtitle info " + v.get_bvid())
+	info["subtitle"] = subtitle_map
 
 	return info
+
+
+async def save_interactive(iv_info, bv_root, fmt = "svg"):
+	dot_file = bv_root + "graph.dot"
+	save_graph(iv_info, dot_file)
+	if dot_bin:
+		util.logv("running dot on " + dot_file,"image format " + fmt)
+		image_file = bv_root + "graph." + fmt
+		cmdline = [dot_bin, "-T" + fmt, dot_file, "-o", image_file]
+		util.logt(cmdline)
+		subprocess.run(cmdline)
+	else:
+		util.logw("dot binary not found, skip")
+
+	theme_url = iv_info.get("theme").get("choice_image", None)
+	if theme_url:
+		util.logv("fetch theme image")
+		ext = os.path.splitext(theme_url)[1]
+		if not ext or ext == "":
+			ext = ".jpg"
+
+		theme_file = bv_root + "theme" + ext
+		# assume theme is unlikely to change
+		if not os.path.isfile(theme_file):
+			await util.fetch(theme_url, theme_file)
+	else:
+		util.logw("missing theme image")
+
+
 
 async def do_fix(bv, path, credential):
 	bv_root = path + bv + os.path.sep
@@ -200,6 +240,10 @@ async def do_fix(bv, path, credential):
 	if not stat.get("cover", False):
 		info = info or await fetch_info(v)
 		await fetch_cover(info, bv_root, True)
+
+	if not stat.get("graph", True):
+		info = info or await fetch_info(v)
+		await save_interactive(info.get("interactive"), bv_root)
 
 	for k, r in stat.items():
 		if r:
@@ -235,41 +279,47 @@ async def do_update(bv, path, credential, force):
 	bv_root = path + bv + os.path.sep
 	v = video.Video(bvid = bv, credential = credential)
 
-	util.logi("downloading " + bv, info.get("title", ""))
 	info = await fetch_info(v)
+	util.logi("downloading " + bv, info.get("title", ""))
 
 	util.mkdir(bv_root)
 	util.logv("save video info")
 	util.save_json(info, bv_root + "info.json")
 
-	result = await fetch_cover(info, bv_root, force)
+	cover_result = await fetch_cover(info, bv_root, force)
 
-	total_parts = info.get("videos")
+	part_list = None
+	if "interactive" in info:
+		iv_info = info.get("interactive")
+		part_list = iv_info.get("nodes")
+		await save_interactive(iv_info, bv_root)
+	else:
+		part_list = info.get("pages")
+
 	finished_parts = 0
-	util.logv("video parts " + str(total_parts))
+	util.logv("video parts " + str(len(part_list)))
 
-	for i in range(total_parts):
-		part_info = info.get("pages")[i]
-		part_cid = part_info.get("cid")
-		util.logi("downloading P" + str(i + 1), str(part_cid), part_info.get("part"))
+	for part in part_list:
+		cid = part.get("cid")
+		util.logi("downloading " + str(cid), part.get("part", None) or part.get("title", ""))
 
-		part_root = bv_root + str(part_cid) + os.path.sep
+		part_root = bv_root + str(cid) + os.path.sep
 		util.mkdir(part_root)
 
-		result = await download_part(v, part_cid, part_root, force)
+		result = await download_part(v, cid, part_root, force)
 
 		# always update danmaku
-		result = await fetch_danmaku(part_cid, part_root, True) and result
+		result = await fetch_danmaku(cid, part_root, True) and result
 
-		result = await fetch_subtitle(info, part_cid, part_root, force) and result
+		result = await fetch_subtitle(info, cid, part_root, force) and result
 
 		if result:
 			finished_parts = finished_parts + 1
 		else:
-			util.loge("error in downloading P" + str(i + 1))
+			util.loge("error in downloading " + str(cid))
 
-	util.logi("finished " + bv, "part " + str(finished_parts) + '/' + str(total_parts))
-	return result and (finished_parts == total_parts)
+	util.logi("finished " + bv, "part " + str(finished_parts) + '/' + str(len(part_list)))
+	return cover_result and (finished_parts == len(part_list))
 
 
 async def download(bv, path = None, credential = None, mode = None):
@@ -300,7 +350,7 @@ async def download(bv, path = None, credential = None, mode = None):
 async def main(args):
 	credential = None
 	if args.auth:
-		credential = util.credential(args.auth)
+		credential = await util.credential(args.auth)
 
 	if len(args.inputs) > 0:
 		util.logv(str(len(args.inputs)) + " BV on cmdline")
@@ -317,7 +367,11 @@ async def main(args):
 
 
 if __name__ == "__main__":
-	args = util.parse_args()
+	args = util.parse_args([
+		(("inputs",), {"nargs" : '*'}),
+		(("-u", "--auth"), {}),
+		(("-m", "--mode"), {"choices" : ["fix", "update", "force"]}),
+	])
 	util.run(main(args))
 
 

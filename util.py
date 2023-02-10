@@ -31,6 +31,8 @@ unit_table = {
 log_prefix = ["FATAL", "ERROR", "WARNING", "INFO", "VERBOSE", "TRACE"]
 log_level = 3
 
+http_timeout = 10
+
 stall_mutex = asyncio.Lock()
 stall_duration = 1
 stall_timestamp = 0
@@ -108,17 +110,15 @@ def list_bv(path):
 
 def parse_args(arg_list = []):
 	global log_level
+	global http_timeout
 	global stall_duration
 	global stall_timestamp
 	global bandwidth_limit
-	global tmp_postfix
 
 	parser = argparse.ArgumentParser()
-	parser.add_argument("inputs", nargs = '*')
 	parser.add_argument("-d", "--dest")
-	parser.add_argument("-m", "--mode", choices = ["fix", "update", "force"])
-	parser.add_argument("-u", "--auth")
-	parser.add_argument("-t", "--stall")
+	parser.add_argument("-t", "--timeout", type = int)
+	parser.add_argument("-s", "--stall", type = float)
 	parser.add_argument("-v", "--verbose", action = "count", default = 0)
 	parser.add_argument("-q", "--quiet", action = "count", default = 0)
 	parser.add_argument("-w", "--bandwidth")
@@ -129,6 +129,9 @@ def parse_args(arg_list = []):
 	args = parser.parse_args()
 
 	log_level = 3 - args.quiet + args.verbose
+
+	if args.timeout:
+		http_timeout = int(args.timeout)
 
 	if args.stall:
 		stall_duration = float(args.stall)
@@ -151,19 +154,22 @@ def opt_path(path):
 		return path
 
 
-def handle_exception(e, msg):
+def handle_exception(e, msg = None):
 	traceback.print_exc()
-	loge(msg + '\n', raw = True)
+	if msg:
+		loge(msg)
+
 	if e is bilibili_api.exceptions.NetworkException and e.status == 412:
 		logf("encounter flow control, rethrow")
 		raise
 
 
 def run(func):
-	asyncio.get_event_loop().run_until_complete(func)
+	# return asyncio.get_event_loop().run_until_complete(func)
+	return bilibili_api.sync(func)
 
 
-def credential(auth_file):
+async def credential(auth_file):
 	parser = re.compile(r"(\S+)[\s\=\:]+(\S+)\s*")
 	info = dict()
 	logv("auth file at " + auth_file)
@@ -175,31 +181,42 @@ def credential(auth_file):
 				info[match.group(1)] = match.group(2)
 
 	credential = Credential(**info)
-	if not credential.check_valid():
+	if not await credential.check_valid():
 		raise Exception("bad Credential")
 
 	return credential
 
 
+class staged_file:
+	def __init__(self, filename, mode = 'r', **kwargs):
+		self.filename = filename
+		self.tmp_name = None
+		if tmp_postfix and ('w' in mode):
+			self.tmp_name = filename + tmp_postfix
+			logv("using stage file " + self.tmp_name)
+
+		self.f = open(self.tmp_name or self.filename, mode = mode, **kwargs)
+
+	def __enter__(self):
+		return self.f
+
+	def __exit__(self, exc_type, exc_value, traceback):
+		self.f.close()
+		if exc_type is None and exc_value is None and self.tmp_name:
+			logv("move " + self.tmp_name + " to " + self.filename)
+			os.replace(self.tmp_name, self.filename)
+
+
 def save_json(obj, path):
 	logv("saving json " + path)
-	tmp_name = path
-	if tmp_postfix:
-		tmp_name = path + tmp_postfix
-		logv("using stage file " + tmp_name)
-
-	with open(tmp_name, "w") as f:
+	with staged_file(path, "w") as f:
 		json.dump(obj, f, indent = '\t', ensure_ascii = False)
-
-	if tmp_postfix:
-		logv("move " + tmp_name + " to " + path)
-		os.replace(tmp_name, path)
 
 
 async def fetch(url, path, mode = "file"):
 	sess = bilibili_api.get_session()
 	logt("fetching " + url + " into " + path)
-	async with sess.stream("GET", url, headers=agent) as resp:
+	async with sess.stream("GET", url, headers=agent, timeout = http_timeout) as resp:
 		logt(resp)
 		resp.raise_for_status()
 

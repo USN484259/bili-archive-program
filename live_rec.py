@@ -117,11 +117,11 @@ async def monitor(rid, path = None, interval = 60, credential = None, schedule =
 async def main(args):
 	credential = None
 	if args.auth:
-		credential = util.credential(args.auth)
+		credential = await util.credential(args.auth)
 
-	util.logi("read recording configuration from " + args.inputs[0])
+	util.logi("read recording configuration from " + args.inputs)
 	config = None
-	with open(args.inputs[0], "r") as f:
+	with open(args.inputs, "r") as f:
 		config = json.load(f)
 
 	util.logt(config)
@@ -140,5 +140,8 @@ async def main(args):
 
 
 if __name__ == "__main__":
-	args = util.parse_args()
+	args = util.parse_args([
+		(("inputs",), {}),
+		(("-u", "--auth"), {}),
+	])
 	util.run(main(args))

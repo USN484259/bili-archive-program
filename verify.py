@@ -2,17 +2,18 @@
 
 import os
 import re
-import util
 import json
 import shutil
 import subprocess
+import util
+from interactive import is_interactive
 
 try:
 	from defusedxml.sax import make_parser as xml_make_parser
 except ModuleNotFoundError:
 	from xml.sax import make_parser as xml_make_parser
 
-ffprobe_path = shutil.which("ffprobe")
+ffprobe_bin = shutil.which("ffprobe")
 ffprobe_options = [
 	"-hide_banner",
 	"-show_format",
@@ -27,12 +28,12 @@ xml_parser = xml_make_parser()
 def ffprobe(path):
 	result = {}
 	try:
-		cmdline = [ffprobe_path]
+		util.logv("running ffprobe on " + path)
+		cmdline = [ffprobe_bin]
 		if util.log_level <= 3:
 			cmdline = cmdline + ["-v", "8"]
 
 		cmdline = cmdline + ffprobe_options + [path]
-		util.logv("running ffprobe on " + path)
 		util.logt(cmdline)
 		with subprocess.Popen(cmdline, stdout = subprocess.PIPE) as proc:
 			result = json.load(proc.stdout)
@@ -44,18 +45,27 @@ def ffprobe(path):
 	return result
 
 
-def verify_media(path, part_duration, duration_tolerance = 2):
+def verify_media(path, part_duration, duration_tolerance):
 	media_info = ffprobe(path)
 	try:
 		vc = 0
 		ac = 0
 		for i, media in enumerate(media_info.get("streams")):
 			media_type = media.get("codec_type")
-			media_duration = float(media.get("duration"))
+			media_duration = media.get("duration", None)
+			if not media_duration:
+				util.logw("missing duration in stream-info, use format-info")
+				media_duration = media_info.get("format").get("duration")
+			media_duration = float(media_duration)
+
 			util.logv("stream " + str(media.get("index")), "type " + media_type, "duration " + str(media_duration))
 
-			if abs(part_duration - media_duration) >= duration_tolerance:
-				util.logw("media duration mismatch, skipping", f)
+			if not duration_tolerance:
+				util.logv("skip duration check")
+			elif not part_duration:
+				util.logw("unknown duration, skip")
+			elif abs(part_duration - media_duration) >= duration_tolerance:
+				util.logw("media duration mismatch")
 				util.logv("duration",  '(' + str(part_duration) + '/' + str(media_duration) + ')')
 				return 0, 0
 
@@ -70,14 +80,17 @@ def verify_media(path, part_duration, duration_tolerance = 2):
 		return 0, 0
 
 
-def verify_bv(bv, path = None, scan_files = False):
+def verify_bv(bv, path = None, scan_files = False, duration_tolerance = None):
+	if scan_files and not ffprobe_bin:
+		raise Exception("ffprobe binary not found")
+
 	result = {
 		"info" : False,
 		"cover" : False
 	}
 	try:
 		bv_root = util.opt_path(path) + bv + os.path.sep
-		util.logv("verify video " + bv, "path " + bv_root, "scan_files " + str(scan_files))
+		util.logv("verify video " + bv, "path " + bv_root, "scan " + str(scan_files), "tolerance " + str(duration_tolerance))
 
 		util.logv("loading video info")
 		with open(bv_root + "info.json") as f:
@@ -108,26 +121,40 @@ def verify_bv(bv, path = None, scan_files = False):
 		else:
 			util.logw("cover not found")
 
-		for i in range(bv_info.get("videos")):
-			part_info = bv_info.get("pages")[i]
-			part_cid = part_info.get("cid")
-			part_duration = part_info.get("duration")
+		part_list = None
+		if "interactive" in bv_info:
+			if not is_interactive(bv_info):
+				raise Exception("conflicting interactive video status")
 
-			util.logi('P' + str(i + 1), "cid " + str(part_cid), part_info.get("part"), str(part_duration) + " sec")
+			part_list = bv_info.get("interactive").get("nodes")
 
-			video_name = "V:" + str(part_cid)
-			danmaku_name = "D:" + str(part_cid)
-			subtitle_name = "S:" + str(part_cid)
+			util.logv("interactive video, checking graph")
+			# TODO scan DOT file
+			result["graph"] = os.path.isfile(bv_root + "graph.dot")
+		else:
+			part_list = bv_info.get("pages")
+			if bv_info.get("videos") != len(part_list):
+				raise Exception("part count mismatch")
+
+		for part in part_list:
+			cid = part.get("cid")
+			part_duration = part.get("duration", None)
+
+			util.logi("cid " + str(cid), part.get("part", None) or part.get("title", ""), str(part_duration or "??") + " sec")
+
+			video_name = "V:" + str(cid)
+			danmaku_name = "D:" + str(cid)
+			subtitle_name = "S:" + str(cid)
 			result[video_name] = False
 			result[danmaku_name] = False
 
-			subtitle = bv_info.get("subtitle")[str(part_cid)].get("subtitles")
+			subtitle = bv_info.get("subtitle")[str(cid)].get("subtitles")
 			util.logv("subtitle count " + str(len(subtitle)))
 			util.logt(subtitle)
 			if len(subtitle) > 0:
 				result[subtitle_name] = False
 
-			part_root = bv_root + str(part_cid) + os.path.sep
+			part_root = bv_root + str(cid) + os.path.sep
 
 			if not os.path.isdir(part_root):
 				util.logv("part dir not exist")
@@ -138,7 +165,7 @@ def verify_bv(bv, path = None, scan_files = False):
 			subtitle_count = 0
 			no_audio = False
 
-			util.logv("checking " + str(part_cid) + " in " + part_root)
+			util.logv("checking " + str(cid) + " in " + part_root)
 			for filename in os.listdir(part_root):
 				util.logv("file " + filename)
 				ext = os.path.splitext(filename)[1].lower()
@@ -196,7 +223,7 @@ def verify_bv(bv, path = None, scan_files = False):
 				if ext == ".m4v":
 					util.logv("type: video")
 					if scan_files:
-						vc, ac = verify_media(part_root + filename, part_duration)
+						vc, ac = verify_media(part_root + filename, part_duration, duration_tolerance)
 						if vc != 1 or ac != 0:
 							util.logw("unexpected media streams")
 							continue
@@ -208,7 +235,7 @@ def verify_bv(bv, path = None, scan_files = False):
 				if ext == ".m4a":
 					util.logv("type: audio")
 					if scan_files:
-						vc, ac = verify_media(part_root + filename, part_duration)
+						vc, ac = verify_media(part_root + filename, part_duration, duration_tolerance)
 						if vc != 0 or ac != 1:
 							util.logw("unexpected media streams")
 							continue
@@ -220,7 +247,7 @@ def verify_bv(bv, path = None, scan_files = False):
 				if ext == ".flv":
 					util.logv("type: flv")
 					if scan_files:
-						vc, ac = verify_media(part_root + filename, part_duration)
+						vc, ac = verify_media(part_root + filename, part_duration, duration_tolerance)
 						if vc != 1 or ac != 1:
 							util.logw("unexpected media streams")
 							continue
@@ -241,11 +268,12 @@ def verify_bv(bv, path = None, scan_files = False):
 			if not result[danmaku_name]:
 				util.logw("missing danmaku file")
 
-			if len(subtitle) == 0:
-				result[subtitle_name] = True
-			else:
-				util.logw("missing subtitle " + str(len(subtitle)) + '/' + str(subtitle_count))
-				util.logt(subtitle)
+			if subtitle_name in result:
+				if len(subtitle) == 0:
+					result[subtitle_name] = True
+				else:
+					util.logw("missing subtitle " + str(len(subtitle)) + '/' + str(subtitle_count))
+					util.logt(subtitle)
 
 		util.logv("verify done for " + bv)
 		result["info"] = True
@@ -263,11 +291,15 @@ def main(args):
 		util.logv("scan BV in " + (args.dest or "(cwd)"))
 		bv_list = util.list_bv(args.dest)
 
-	util.logi("BV count " + str(len(bv_list)), "mode " + str(args.mode))
+	util.logi("BV count " + str(len(bv_list)))
 	util.logt(bv_list)
 
+	tolerance = args.tolerance
+	if tolerance:
+		tolerance = float(tolerance)
+
 	for i, bv in enumerate(bv_list):
-		result = verify_bv(bv, path = args.dest, scan_files = args.scan)
+		result = verify_bv(bv, path = args.dest, scan_files = args.scan, duration_tolerance = tolerance)
 		res = True
 		for k, v in result.items():
 			if not v:
@@ -278,6 +310,8 @@ def main(args):
 
 if __name__ == "__main__":
 	args = util.parse_args([
-		(("--scan",), {"action" : "store_true"})
+		(("inputs",), {"nargs" : '*'}),
+		(("--scan",), {"action" : "store_true"}),
+		(("--tolerance",), {"type" : float})
 	])
 	main(args)

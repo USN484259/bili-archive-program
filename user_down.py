@@ -53,7 +53,7 @@ async def download(uid, path = None, credential = None):
 	info["video_list"] = video_list
 
 	util.logv("save user info")
-	await util.save_json(info, path + str(uid) + os.path.sep + "info.json")
+	util.save_json(info, path + str(uid) + os.path.sep + "info.json")
 
 	util.logv("finished " + str(uid))
 	return video_list
@@ -82,7 +82,6 @@ async def dump_user(uid_list, path = None, credential = None, mode = None):
 
 		except Exception as e:
 			util.handle_exception(e, "failed to get user " + str(uid))
-
 	
 	util.logt(bv_table)
 	if mode == "skip":
@@ -103,14 +102,18 @@ async def dump_user(uid_list, path = None, credential = None, mode = None):
 async def main(args):
 	credential = None
 	if args.auth:
-		credential = util.credential(args.auth)
+		credential = await util.credential(args.auth)
 
 	util.logv(args.inputs)
 	await dump_user(args.inputs, path = args.dest, mode = args.mode, credential = credential)
 
 
 if __name__ == "__main__":
-	args = util.parse_args()
+	args = util.parse_args([
+		(("inputs",), {"nargs" : '+'}),
+		(("-u", "--auth"), {}),
+		(("-m", "--mode"), {"choices" : ["skip", "fix", "update", "force"]}),
+	])
 	util.run(main(args))
 
 

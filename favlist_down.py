@@ -38,7 +38,7 @@ async def download(mid, path = None, credential = None):
 
 	info_file = path + str(mid) + ".json"
 	util.logv("save favlist as " + info_file)
-	await util.save_json(favlist_head, info_file)
+	util.save_json(favlist_head, info_file)
 
 	return media_list
 
@@ -91,7 +91,7 @@ async def dump_favlist(uid, filter = None, path = None, credential = None, mode 
 async def main(args):
 	credential = None
 	if args.auth:
-		credential = util.credential(args.auth)
+		credential = await util.credential(args.auth)
 
 	parser = re.compile(r"(\d+)\:?(.*)")
 
@@ -107,5 +107,9 @@ async def main(args):
 			util.handle_exception(e, "failed to download favlist " + v)
 
 if __name__ == "__main__":
-	args = util.parse_args()
+	args = util.parse_args([
+		(("inputs",), {"nargs" : '+'}),
+		(("-u", "--auth"), {}),
+		(("-m", "--mode"), {"choices" : ["skip", "fix", "update", "force"]}),
+	])
 	util.run(main(args))
