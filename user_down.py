@@ -90,13 +90,14 @@ async def dump_user(uid_list, path = None, credential = None, mode = None):
 	
 	util.logi("need to download " + str(len(bv_table)) + " videos")
 	util.mkdir(path + "video")
-	for bv, _ in bv_table.items():
-		try:
-			await bv_down.download(bv, path = path + "video", credential = credential, mode = mode)
-		except Exception as e:
-			util.handle_exception(e, "failed to download " + bv)
+	finished_count = 0
+	for bv in bv_table.keys():
+		res = await bv_down.download(bv, path = path + "video", credential = credential, mode = mode)
+		if res:
+			finished_count += 1
+		print(bv, res, flush = True)
 
-	util.logi("finished downloading users")
+	util.logi("finished downloading users", str(finished_count) + '/' + str(len(bv_table)))
 
 
 async def main(args):

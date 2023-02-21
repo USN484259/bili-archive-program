@@ -1,43 +1,55 @@
 {
+	"interval" : 30,
 	"list" : [
 		{
-			"rid" : 876396,
-			"name" : "冰糖"
+			"uid" : 198297,
+			"name" : "冰糖",
+			"live" : true
 		},
 		{
-			"rid" : 59901,
-			"name" : "Warma"
+			"uid" : 53456,
+			"name" : "Warma",
+			"live" : true
 		},
 		{
-			"rid" : 7972015,
-			"name" : "瑞安"
+			"uid" : 108845996,
+			"name" : "瑞安",
+			"live" : true
 		},
 		{
-			"rid" : 544610,
-			"name" : "ilem"
+			"uid" : 3379951,
+			"name" : "ilem",
+			"live" : true
 		},
 		{
-			"rid" : 23131609,
-			"name" : "狗哥"
+			"uid" : 2147476554,
+			"name" : "狗哥",
+			"live" : true
 		},
 		{
-			"rid" : 25075490,
-			"name" : "祈里"
+			"uid" : 198263459,
+			"name" : "祈里",
+			"live" : true
 		},
 		{
-			"rid" : 21919321,
+			"uid" : 508963009,
 			"name" : "Hiiro",
-			"schedule": [
-				["22:00", "10:00"]
-			]
+			"live" : ["20:30-10:00"]
 		},
 		{
-			"rid" : 318,
-			"name" : "醒爷"
+			"uid" : 2100679,
+			"name" : "醒爷",
+			"live" : true
 		},
 		{
-			"rid" : 23698286,
-			"name" : "もも"
+			"uid" : 2073012767,
+			"name" : "もも",
+			"live" : true
+		},
+		{
+			"uid" : 234782,
+			"name" : "祈Inory",
+			"live" : true
 		}
 	]
 }

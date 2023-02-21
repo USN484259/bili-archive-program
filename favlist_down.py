@@ -79,13 +79,14 @@ async def dump_favlist(uid, filter = None, path = None, credential = None, mode 
 
 	util.logi("need to download " + str(len(bv_table)) + " videos")
 	util.mkdir(path + "video")
-	for bv, _ in bv_table.items():
-		try:
-			await bv_down.download(bv, path = path + "video", credential = credential, mode = mode)
-		except Exception as e:
-			util.handle_exception(e, "failed to download " + bv)
+	finished_count = 0
+	for bv in bv_table.keys():
+		res = await bv_down.download(bv, path = path + "video", credential = credential, mode = mode)
+		if res:
+			finished_count += 1
+		print(bv, res, flush = True)
 
-	util.logi("finished downloading favlist")
+	util.logi("finished downloading favlist", str(finished_count) + '/' + str(len(bv_table)))
 
 
 async def main(args):
@@ -93,7 +94,7 @@ async def main(args):
 	if args.auth:
 		credential = await util.credential(args.auth)
 
-	parser = re.compile(r"(\d+)\:?(.*)")
+	parser = re.compile(r"(\d+)(?::(.+))?")
 
 	util.logv(args.inputs)
 	for i, v in enumerate(args.inputs):

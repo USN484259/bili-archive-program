@@ -314,7 +314,7 @@ async def do_update(bv, path, credential, force):
 		result = await fetch_subtitle(info, cid, part_root, force) and result
 
 		if result:
-			finished_parts = finished_parts + 1
+			finished_parts += 1
 		else:
 			util.loge("error in downloading " + str(cid))
 

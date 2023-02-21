@@ -159,7 +159,7 @@ def handle_exception(e, msg = None):
 	if msg:
 		loge(msg)
 
-	if e is bilibili_api.exceptions.NetworkException and e.status == 412:
+	if isinstance(e, bilibili_api.exceptions.NetworkException) and e.status == 412:
 		logf("encounter flow control, rethrow")
 		raise
 
