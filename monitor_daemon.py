@@ -116,7 +116,7 @@ class content_monitor_live(content_monitor_base):
 		if self.state == "idle":
 			tm = time.localtime()
 			if self.config == True or live_rec.match_schedule(self.config, tm):
-				self.rec_name = util.opt_path(monitor_root.get("dest")) + live_rec.make_record_name(live_info, room_info, tm)
+				self.rec_name = util.opt_path(monitor_root.get("dest")) + "live" + os.path.sep + live_rec.make_record_name(live_info, room_info, tm)
 				self.state = "record"
 				util.logv("new record for room " + str(room_id), self.rec_name)
 				return live_info

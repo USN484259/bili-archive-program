@@ -99,7 +99,7 @@ def verify_bv(bv, path = None, scan_files = False, duration_tolerance = None):
 
 		util.logi(bv, bv_info.get("title"))
 
-		for ext in [".jpg", ".png"]:
+		for ext in [".jpg", ".png", ".gif", ".bmp"]:
 			cover_file = bv_root + "cover" + ext
 			util.logv("checking cover " + cover_file)
 			if not os.path.isfile(cover_file):

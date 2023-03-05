@@ -171,6 +171,15 @@ async def fetch_info(v):
 		part_list = iv_info.get("nodes")
 	else:
 		part_list = info.get("pages")
+		expect_count = info.get("videos")
+		actual_count = len(part_list)
+		if expect_count != actual_count:
+			msg = ["part count mismatch", str(actual_count) + '/' + str(expect_count)]
+			if expect_count < actual_count:
+				util.logw(*msg)
+				info["videos"] = actual_count
+			else:
+				raise Exception(msg[0] + ':' + msg[1])
 
 	subtitle_map = {}
 	for part in part_list:

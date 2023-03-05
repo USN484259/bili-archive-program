@@ -34,7 +34,7 @@
 		{
 			"uid" : 508963009,
 			"name" : "Hiiro",
-			"live" : ["20:30-10:00"]
+			"live" : true
 		},
 		{
 			"uid" : 2100679,
@@ -49,7 +49,7 @@
 		{
 			"uid" : 234782,
 			"name" : "祈Inory",
-			"live" : true
+			"live" : false
 		}
 	]
 }
