@@ -131,10 +131,16 @@ class content_monitor_live(content_monitor_base):
 
 	async def worker(self, usr, live_info):
 		room_id = live_info.get("live_room").get("roomid")
-		util.logv("start recording room " + str(room_id))
 		room = LiveRoom(room_id)
-		await live_rec.record(room, self.rec_name)
-		util.logv("stop recording room " + str(room_id))
+		util.mkdir(self.rec_name)
+		task_danmaku = asyncio.create_task(live_rec.record_danmaku(room, self.rec_name))
+		task_danmaku.add_done_callback(asyncio.Task.result)
+		try:
+			util.logv("start recording room " + str(room_id))
+			await live_rec.record(room, self.rec_name + os.path.sep + "live.flv")
+		finally:
+			util.logv("stop recording room " + str(room_id))
+			task_danmaku.cancel()
 
 
 class content_monitor_dynamic(content_monitor_base):
@@ -221,8 +227,11 @@ class user_monitor:
 
 async def worker_monitor():
 	while True:
-		for item in monitor_root.get("list"):
-			await item.step()
+		try:
+			for item in monitor_root.get("list"):
+				await item.step()
+		except Exception as e:
+			util.handle_exception(e, "exception on monitor step")
 
 		interval = monitor_root.get("interval", 60)
 		util.logv("monitor sleep " + str(interval) + " sec")

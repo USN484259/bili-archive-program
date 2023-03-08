@@ -11,10 +11,13 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 |	`favlist_down`	|	download videos in favorite-lists	|
 |	`verify`	|	check integrity of downloaded videos	|
 |	`live_rec`	|	record live-streaming of given rooms	|
+|	`monitor_daemon`|	daemon process to auto record & download	|
+|	`monitor_ctrl`	|	interface to change daemon config on the fly	|
 
 ### Mandatory Dependency
 * [Python3.8](https://docs.python.org/3.8/) or higher
 * [bilibili-api-python](https://github.com/Nemo2011/bilibili-api)
+* [aiofile](https://pypi.org/project/aiofile/)
 
 ### Optional Dependency
 * `ffprobe` from [ffmpeg](https://ffmpeg.org/) to scan media files

@@ -7,6 +7,7 @@ import httpx
 import traceback
 import argparse
 import json
+from aiofile import async_open
 import bilibili_api
 from bilibili_api import Credential
 
@@ -31,7 +32,7 @@ unit_table = {
 log_prefix = ["FATAL", "ERROR", "WARNING", "INFO", "VERBOSE", "TRACE"]
 log_level = 3
 
-http_timeout = 10
+http_timeout = 30
 
 stall_mutex = asyncio.Lock()
 stall_duration = 1
@@ -173,8 +174,8 @@ async def credential(auth_file):
 	parser = re.compile(r"(\S+)[\s\=\:]+(\S+)\s*")
 	info = dict()
 	logv("auth file at " + auth_file)
-	with open(auth_file, "r") as f:
-		for line in f:
+	async with async_open(auth_file, "r") as f:
+		async for line in f:
 			match = parser.fullmatch(line)
 			if match:
 				logt("got key " + match.group(1))
@@ -241,7 +242,7 @@ async def fetch(url, path, mode = "file"):
 		else:
 			raise Exception("fetch: unknown mode " + mode)
 
-		with open(file_name, file_mode) as f:
+		async with async_open(file_name, file_mode) as f:
 			last_timestamp = None
 			if mode == "file" and bandwidth_limit:
 				logv("bandwidth limit " + str(bandwidth_limit) + " byte/sec")
@@ -249,7 +250,7 @@ async def fetch(url, path, mode = "file"):
 
 			async for chunk in resp.aiter_bytes():
 				logt('*', raw = True)
-				f.write(chunk)
+				await f.write(chunk)
 
 				if mode == "file" and bandwidth_limit:
 					cur_timestamp = time.monotonic_ns()

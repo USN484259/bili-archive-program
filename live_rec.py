@@ -5,14 +5,90 @@ import time
 import asyncio
 import re
 import json
+from aiofile import async_open
+from collections import deque
 from bilibili_api import live, user
 import util
 
 schedule_pattern = re.compile(r"(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?[-~]+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?")
 
 
+async def record_danmaku(room, path, filename = "danmaku.json"):
+	path = util.opt_path(path)
+	rec_name = path + filename
+	util.logv("record live danmaku into " + rec_name)
+	conn = live.LiveDanmaku(room.room_display_id)
+	async with async_open(rec_name, "a") as f:
+		mutex = asyncio.Lock()
+		queue = deque()
+		cond = asyncio.Condition()
+		async def worker_wget(path):
+			while True:
+				name = None
+				url = None
+				async with cond:
+					util.logt("wget standby")
+					await cond.wait()
+					name, url = queue.popleft()
+
+				util.logv("fetch emot " + name)
+				ext = os.path.splitext(url)[1]
+				if not ext or ext == "":
+					ext = ".png"
+				emot_file = path + name + ext
+				util.logt(emot_file, url)
+				if os.path.isfile(emot_file):
+					util.logv("skip existing emot")
+				else:
+					await util.fetch(url, emot_file)
+
+		async def on_event(info):
+			util.logt(info)
+			cmd = info.get("type")
+			data = info.get("data")
+			if not data:
+				data = {}
+			elif not isinstance(data, dict):
+				data = { "data": data }
+
+			data["cmd"] = cmd
+			data["timestamp"] = int(time.time_ns() / util.sec_to_ns)
+
+			async with mutex:
+				util.logv(cmd)
+				await f.write(json.dumps(data, ensure_ascii = False) + '\n')
+
+			for meta in data.get("info", [[]])[0]:
+				if not isinstance(meta, dict):
+					continue
+				emot_name = meta.get("emoticon_unique")
+				emot_url = meta.get("url")
+				if emot_name and emot_url:
+					util.logt("scheduled emot fetch " + emot_name)
+					async with cond:
+						queue.append((emot_name, emot_url))
+						cond.notify()
+
+		wget_task = asyncio.create_task(worker_wget(path))
+		wget_task.add_done_callback(asyncio.Task.result)
+		conn.add_event_listener("ALL", on_event)
+
+		try:
+			while True:
+					try:
+						util.logv("connect to live danmaku")
+						await conn.connect()
+					except Exception as e:
+						util.handle_exception(e, "exception on recording danmaku")
+
+		finally:
+			util.logv("disconnect live danmaku")
+			wget_task.cancel()
+			conn.disconnect()
+
+
 async def record(room, path, resolution = live.ScreenResolution.ORIGINAL):
-	util.logv("record live into " + path + " resolution " + str(resolution))
+	util.logv("record live into " + path, "resolution " + str(resolution))
 
 	while True:
 		start_time = time.monotonic_ns()
@@ -38,7 +114,7 @@ async def record(room, path, resolution = live.ScreenResolution.ORIGINAL):
 
 
 def make_record_name(name_struct, title_struct, tm):
-	return name_struct.get("name") + '_' + title_struct.get("title") + '_' + time.strftime("%y_%m_%d_%H_%M", tm) + ".flv"
+	return name_struct.get("name") + '_' + title_struct.get("title") + '_' + time.strftime("%y_%m_%d_%H_%M", tm)
 
 
 def parse_schedule(sched):
@@ -83,7 +159,7 @@ async def task_record(rid, path):
 	room_info = (await room.get_room_info()).get("room_info")
 	usr = user.User(room_info.get("uid"))
 	user_info = await usr.get_user_info()
-	rec_path = path + make_record_name(user_info, room_info, time.localtime())
+	rec_path = path + make_record_name(user_info, room_info, time.localtime()) + ".flv"
 	await record(room, rec_path)
 
 async def main(args):
