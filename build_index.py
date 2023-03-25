@@ -69,7 +69,7 @@ def build_video_index(path, img_size = 64):
 						bv_root = "/video/" + bv + '/'
 						cover_ext = ".jpg"
 						for ext in [".jpg", ".png", ".gif", ".bmp"]:
-							if os.path.isfile(bv_root + "cover" + ext):
+							if os.path.isfile(path + os.path.sep + bv + os.path.sep  + "cover" + ext):
 								cover_ext = ext
 								break
 

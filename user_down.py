@@ -1,9 +1,23 @@
 #!/usr/bin/env python3
 
 import os
-from bilibili_api import user
+from bilibili_api import user, video
 import util
 import bv_down
+
+async def fetch_episodes(bv, credential):
+	util.logv("fetch episodes from " + bv)
+	await util.stall()
+	v = video.Video(bvid = bv, credential = credential)
+	info = await v.get_info()
+
+	result = []
+	for section in info.get("ugc_season").get("sections"):
+		result += section.get("episodes")
+
+	util.logt(result)
+	return result
+
 
 async def download(uid, path = None, credential = None):
 	path = util.opt_path(path)
@@ -45,7 +59,18 @@ async def download(uid, path = None, credential = None):
 		video_part = await usr.get_videos(pn = page_index)
 		util.logt(video_part)
 		video_list = video_list + video_part.get("list").get("vlist")
-	
+
+	util.logt(video_list)
+	util.logv("checking episodes")
+	for element in video_list:
+		ep_count = (element.get("meta") or {}).get("ep_count")
+		util.logt(element.get("bvid"), "ep_count", ep_count)
+		if ep_count:
+			episodes = await fetch_episodes(element.get("bvid"), credential)
+			assert(len(episodes) == ep_count)
+			element["episodes"] = episodes
+
+
 	util.logv("finished fetching videos " + str(uid))
 	util.logt(video_list)
 
@@ -79,6 +104,8 @@ async def dump_user(uid_list, path = None, credential = None, mode = None):
 			util.logv(str(len(video_list)) + " videos from user " + str(uid))
 			for _, bv in enumerate(video_list):
 				bv_table[bv.get("bvid")] = True
+				for ep in bv.get("episodes", []):
+					bv_table[ep.get("bvid")] = True
 
 		except Exception as e:
 			util.handle_exception(e, "failed to get user " + str(uid))
