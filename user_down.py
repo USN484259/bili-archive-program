@@ -5,18 +5,56 @@ from bilibili_api import user, video
 import util
 import bv_down
 
-async def fetch_episodes(bv, credential):
-	util.logv("fetch episodes from " + bv)
+
+async def fetch_season(usr, season_id):
+	page_index = 1
 	await util.stall()
-	v = video.Video(bvid = bv, credential = credential)
-	info = await v.get_info()
+	season_info = await usr.get_channel_videos_season(season_id, pn = page_index)
+	season_list = season_info.get("archives")
+	season_meta = season_info.get("meta")
+	assert(season_meta.get("season_id") == season_id)
+	season_count = season_meta.get("total")
 
-	result = []
-	for section in info.get("ugc_season").get("sections"):
-		result += section.get("episodes")
+	util.logv("season " + str(season_id), season_meta.get("name"), "count " + str(season_count))
+	util.logt(season_info)
 
-	util.logt(result)
-	return result
+	while (len(season_list) < season_count):
+		util.logv("videos " + str(len(season_list)) + '/' + str(season_count))
+		page_index += 1
+		await util.stall()
+		util.logv("fetching page " + str(page_index))
+		season_part = await usr.get_channel_videos_season(season_id, pn = page_index)
+		util.logt(season_part)
+		season_list += season_part.get("archives")
+
+	assert(len(season_info.get("archives")) == season_count)
+	return season_info
+
+
+async def fetch_series(usr, series_meta):
+	series_id = series_meta.get("series_id")
+	page_index = 1
+	await util.stall()
+	series_info = await usr.get_channel_videos_series(series_id, pn = page_index)
+	assert("meta" not in series_info)
+	series_info["meta"] = series_meta
+	series_list = series_info.get("archives")
+	series_count = series_meta.get("total")
+
+	util.logv("series " + str(series_id), series_meta.get("name"), "count " + str(series_count))
+	util.logt(series_info)
+
+	while (len(series_list) < series_count):
+		util.logv("videos " + str(len(series_list)) + '/' + str(series_count))
+		page_index += 1
+		await util.stall()
+		util.logv("fetching page " + str(page_index))
+		series_part = await usr.get_channel_videos_series(series_id, pn = page_index)
+		util.logt(series_part)
+		series_list += series_part.get("archives")
+
+	assert(len(series_info.get("archives")) == series_count)
+	return series_info
 
 
 async def download(uid, path = None, credential = None):
@@ -42,7 +80,6 @@ async def download(uid, path = None, credential = None):
 		util.logv("fetching pendant")
 		await util.fetch(info.get("pendant").get("image"), path + str(uid) + os.path.sep + "pendant.png")
 
-
 	page_index = 1
 	await util.stall()
 	util.logv("fetching page " + str(page_index))
@@ -53,35 +90,42 @@ async def download(uid, path = None, credential = None):
 
 	while len(video_list) < video_count:
 		util.logv("videos " + str(len(video_list)) + '/' + str(video_count))
-		page_index = page_index + 1
+		page_index += 1
 		await util.stall()
 		util.logv("fetching page " + str(page_index))
 		video_part = await usr.get_videos(pn = page_index)
 		util.logt(video_part)
-		video_list = video_list + video_part.get("list").get("vlist")
+		video_list += video_part.get("list").get("vlist")
 
-	util.logt(video_list)
-	util.logv("checking episodes")
-	for element in video_list:
-		ep_count = (element.get("meta") or {}).get("ep_count")
-		util.logt(element.get("bvid"), "ep_count", ep_count)
-		if ep_count:
-			episodes = await fetch_episodes(element.get("bvid"), credential)
-			assert(len(episodes) == ep_count)
-			element["episodes"] = episodes
+	util.logv("fetching channels")
+	await util.stall()
+	channels = await usr.get_channel_list()
 
+	season_list = []
+	for season in channels.get("items_lists").get("seasons_list"):
+		util.logv("fetching season", season.get("meta").get("name"))
+		season_list.append(await fetch_season(usr, season.get("meta").get("season_id")))
 
-	util.logv("finished fetching videos " + str(uid))
+	series_list = []
+	for series in channels.get("items_lists").get("series_list"):
+		util.logv("fetching series", series.get("meta").get("name"))
+		series_list.append(await fetch_series(usr, series.get("meta")))
+
+	util.logv("finished fetching user " + str(uid))
 	util.logt(video_list)
 
 	assert("video_list" not in info)
 	info["video_list"] = video_list
+	assert("season_list" not in info)
+	info["season_list"] = season_list
+	assert("series_list" not in info)
+	info["series_list"] = series_list
 
 	util.logv("save user info")
 	util.save_json(info, path + str(uid) + os.path.sep + "info.json")
 
 	util.logv("finished " + str(uid))
-	return video_list
+	return video_list, season_list, series_list
 
 
 async def dump_user(uid_list, path = None, credential = None, mode = None):
@@ -97,15 +141,21 @@ async def dump_user(uid_list, path = None, credential = None, mode = None):
 	for i, uid in enumerate(uid_list):
 		try:
 			util.logi("downloading user " + str(uid))
-			video_list = await download(uid, path = path + "user", credential = credential)
+			video_list, season_list, series_list = await download(uid, path = path + "user", credential = credential)
 			if mode == "skip":
 				continue
 
 			util.logv(str(len(video_list)) + " videos from user " + str(uid))
-			for _, bv in enumerate(video_list):
+			for bv in video_list:
 				bv_table[bv.get("bvid")] = True
-				for ep in bv.get("episodes", []):
-					bv_table[ep.get("bvid")] = True
+
+			for season in season_list:
+				for bv in season.get("archives"):
+					bv_table[bv.get("bvid")] = True
+
+			for series in series_list:
+				for bv in series.get("archives"):
+					bv_table[bv.get("bvid")] = True
 
 		except Exception as e:
 			util.handle_exception(e, "failed to get user " + str(uid))
