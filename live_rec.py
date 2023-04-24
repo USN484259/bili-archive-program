@@ -91,7 +91,7 @@ async def record(room, path, resolution = live.ScreenResolution.ORIGINAL):
 	util.logv("record live into " + path, "resolution " + str(resolution))
 
 	while True:
-		start_time = time.monotonic_ns()
+		start_time = time.time_ns()
 		try:
 			play_info = await room.get_room_play_info()
 			util.logt(play_info)
@@ -101,11 +101,13 @@ async def record(room, path, resolution = live.ScreenResolution.ORIGINAL):
 			info = await room.get_room_play_url(resolution)
 			util.logt(info)
 			url = info.get("durl")[0].get("url")
-			await util.fetch(url, path, mode = "stream")
+			filename = str(start_time // util.sec_to_ns) + ".flv"
+			util.logv("record file", filename)
+			await util.fetch(url, path + os.path.sep + filename, mode = "stream")
 		except Exception as e:
 			util.handle_exception(e)
 
-		stop_time = time.monotonic_ns()
+		stop_time = time.time_ns()
 		diff_time = stop_time - start_time
 		sleep_time = util.sec_to_ns - diff_time
 		if diff_time >= 0 and sleep_time > 0:
@@ -159,7 +161,8 @@ async def task_record(rid, path):
 	room_info = (await room.get_room_info()).get("room_info")
 	usr = user.User(room_info.get("uid"))
 	user_info = await usr.get_user_info()
-	rec_path = path + make_record_name(user_info, room_info, time.localtime()) + ".flv"
+	rec_path = path + make_record_name(user_info, room_info, time.localtime())
+	util.mkdir(rec_path)
 	await record(room, rec_path)
 
 async def main(args):

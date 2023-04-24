@@ -137,7 +137,7 @@ class content_monitor_live(content_monitor_base):
 		task_danmaku.add_done_callback(asyncio.Task.result)
 		try:
 			util.logv("start recording room " + str(room_id))
-			await live_rec.record(room, self.rec_name + os.path.sep + "live.flv")
+			await live_rec.record(room, self.rec_name)
 		finally:
 			util.logv("stop recording room " + str(room_id))
 			task_danmaku.cancel()

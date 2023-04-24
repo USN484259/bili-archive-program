@@ -6,7 +6,7 @@ import util
 import bv_down
 
 
-async def fetch_season(usr, season_id):
+async def fetch_season(usr, season_id, exclude_list = {}):
 	page_index = 1
 	await util.stall()
 	season_info = await usr.get_channel_videos_season(season_id, pn = page_index)
@@ -14,9 +14,14 @@ async def fetch_season(usr, season_id):
 	season_meta = season_info.get("meta")
 	assert(season_meta.get("season_id") == season_id)
 	season_count = season_meta.get("total")
+	season_name = season_meta.get("name")
 
-	util.logv("season " + str(season_id), season_meta.get("name"), "count " + str(season_count))
+	util.logv("season " + str(season_id), season_name, "count " + str(season_count))
 	util.logt(season_info)
+
+	if season_name in exclude_list:
+		util.logw("excluded", season_name)
+		return
 
 	while (len(season_list) < season_count):
 		util.logv("videos " + str(len(season_list)) + '/' + str(season_count))
@@ -31,7 +36,7 @@ async def fetch_season(usr, season_id):
 	return season_info
 
 
-async def fetch_series(usr, series_meta):
+async def fetch_series(usr, series_meta, exclude_list = {}):
 	series_id = series_meta.get("series_id")
 	page_index = 1
 	await util.stall()
@@ -40,9 +45,14 @@ async def fetch_series(usr, series_meta):
 	series_info["meta"] = series_meta
 	series_list = series_info.get("archives")
 	series_count = series_meta.get("total")
+	series_name = series_meta.get("name")
 
-	util.logv("series " + str(series_id), series_meta.get("name"), "count " + str(series_count))
+	util.logv("series " + str(series_id), series_name, "count " + str(series_count))
 	util.logt(series_info)
+
+	if series_name in exclude_list:
+		util.logw("excluded", series_name)
+		return
 
 	while (len(series_list) < series_count):
 		util.logv("videos " + str(len(series_list)) + '/' + str(series_count))
@@ -101,15 +111,22 @@ async def download(uid, path = None, credential = None):
 	await util.stall()
 	channels = await usr.get_channel_list()
 
+	# TODO support custom exclude-lists
+	exclude_list = ["直播回放"]
+
 	season_list = []
 	for season in channels.get("items_lists").get("seasons_list"):
 		util.logv("fetching season", season.get("meta").get("name"))
-		season_list.append(await fetch_season(usr, season.get("meta").get("season_id")))
+		season_obj = await fetch_season(usr, season.get("meta").get("season_id"), exclude_list)
+		if season_obj:
+			season_list.append(season_obj)
 
 	series_list = []
 	for series in channels.get("items_lists").get("series_list"):
 		util.logv("fetching series", series.get("meta").get("name"))
-		series_list.append(await fetch_series(usr, series.get("meta")))
+		series_obj = await fetch_series(usr, series.get("meta"), exclude_list)
+		if series_obj:
+			series_list.append(series_obj)
 
 	util.logv("finished fetching user " + str(uid))
 	util.logt(video_list)

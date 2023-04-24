@@ -24,10 +24,16 @@ def find_best(res_list):
 		"id": 0
 	}
 	for k, v in enumerate(res_list):
-		util.logt("quality " + str(v.get("id")), "codec " + str(v.get("codecid")))
+		codec_id = v.get("codecid")
+		util.logt("quality " + str(v.get("id")), "codec " + str(codec_id))
 		if v.get("id") < result.get("id"):
 			continue
-		elif v.get("id") == result.get("id") and v.get("codecid") <= result.get("codecid"):
+
+		# TODO better handling for HEVC
+		if codec_id == 12:	# skip HEVC, aka H.265
+			continue
+
+		elif v.get("id") == result.get("id") and codec_id <= result.get("codecid"):
 			continue
 		result = v
 	return result
