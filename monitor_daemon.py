@@ -5,19 +5,14 @@ import re
 import sys
 import time
 import json
+import logging
 import asyncio
 from bilibili_api.user import User
 from bilibili_api.live import LiveRoom
 import util
 import live_rec
 
-"""
-empty_pattern = re.compile(r"\s*")
-# cmd_pattern = re.compile(r"([gs])et\s+(?:(live|dynamic|upload)@)?(\S+)\s+(.*)\s*")
-get_pattern = re.compile(r"(?:(live|dynamic|upload)@)?([^\s@]+)\s*")
-set_pattern = re.compile(r"(live|dynamic|upload)@([^\s@]+)\s*(.*)")
-kv_pattern = re.compile(r"(\S+?)=(\S+?)")
-"""
+logger = logging.getLogger(__name__)
 
 
 class content_monitor_base:
@@ -58,16 +53,16 @@ class content_monitor_base:
 	async def step(self, usr):
 		if self.task:
 			if self.task.done():
-				util.logv("task completed")
+				logger.debug("task completed")
 				self.task = None
 			else:
-				util.logv("task running, skip")
+				logger.debug("task running, skip")
 				return
 
 		userdata = await self.check(usr)
 		if not userdata:
 			return
-		util.logv("starting task")
+		logger.debug("starting task")
 		self.task = asyncio.create_task(self.worker(usr, userdata))
 		self.task.add_done_callback(asyncio.Task.result)
 
@@ -97,17 +92,17 @@ class content_monitor_live(content_monitor_base):
 		if not self.config:
 			return
 
-		util.logv("monitoring live room")
+		logger.debug("monitoring live room")
 		live_info = await usr.get_live_info()
-		util.logt(live_info)
+		logger.log(util.LOG_TRACE, live_info)
 		room_info = live_info.get("live_room")
 		if not room_info:
-			util.logv("no live room, skip")
+			logger.debug("no live room, skip")
 			return
 
 		room_id = room_info.get("roomid")
 		live_status = room_info.get("liveStatus")
-		util.logv("live room " + str(room_id), "status " + str(live_status))
+		logger.debug("live room %d, status %d", room_id, live_status)
 		if live_status != 1:
 			self.state = "idle"
 			self.rec_name = None
@@ -118,15 +113,15 @@ class content_monitor_live(content_monitor_base):
 			if self.config == True or live_rec.match_schedule(self.config, tm):
 				self.rec_name = util.opt_path(monitor_root.get("dest")) + "live" + os.path.sep + live_rec.make_record_name(live_info, room_info, tm)
 				self.state = "record"
-				util.logv("new record for room " + str(room_id), self.rec_name)
+				logger.debug("new record for room %d, %s", room_id, self.rec_name)
 				return live_info
 			else:
 				self.state = "skip"
-				util.logv("schedule not match, skip recording room " + str(room_id))
+				logger.debug("schedule not match, skip recording room %d", room_id)
 				return
 
 		elif self.state == "record":
-			util.logv("continue recording room " + str(room_id))
+			logger.debug("continue recording room %d", room_id)
 			return live_info
 
 	async def worker(self, usr, live_info):
@@ -136,10 +131,10 @@ class content_monitor_live(content_monitor_base):
 		task_danmaku = asyncio.create_task(live_rec.record_danmaku(room, self.rec_name))
 		task_danmaku.add_done_callback(asyncio.Task.result)
 		try:
-			util.logv("start recording room " + str(room_id))
+			logger.debug("start recording room %d", room_id)
 			await live_rec.record(room, self.rec_name)
 		finally:
-			util.logv("stop recording room " + str(room_id))
+			logger.debug("stop recording room %d", room_id)
 			task_danmaku.cancel()
 
 
@@ -212,16 +207,16 @@ class user_monitor:
 		return self.content_monitor[key].set(vargs)
 
 	async def step(self):
-		util.logv("monitoring " + self.name)
+		logger.debug("monitoring " + self.name)
 		for c, m in self.content_monitor.items():
-			util.logv("checking " + c)
+			logger.debug("checking " + c)
 			await util.stall()
 			await m.step(self.user)
 
 	async def cancel(self):
-		util.logv("monitor exit " + self.name)
+		logger.debug("monitor exit " + self.name)
 		for c, m in self.content_monitor.items():
-			util.logv("cancel " + c)
+			logger.debug("cancel " + c)
 			await m.cancel()
 
 
@@ -231,10 +226,11 @@ async def worker_monitor():
 			for item in monitor_root.get("list"):
 				await item.step()
 		except Exception as e:
-			util.handle_exception(e, "exception on monitor step")
+			logger.exception("exception on monitor step")
+			util.on_exception(e)
 
 		interval = monitor_root.get("interval", 60)
-		util.logv("monitor sleep " + str(interval) + " sec")
+		logger.debug("monitor sleep %d sec", interval)
 		await asyncio.sleep(interval)
 
 
@@ -282,7 +278,7 @@ async def on_command(cmd_list):
 		else:
 			name = (await usr.get_user_info()).get("name")
 
-		util.logv("add user " + name, "uid " + str(uid))
+		logger.debug("add user %s, uid %d", name, uid)
 		for item in monitor_list:
 			if item.user.get_uid() == uid or item.name == name:
 				raise Exception("user already exists")
@@ -301,20 +297,21 @@ async def on_connected(reader, writer):
 
 	while not reader.at_eof():
 		cmd_list = (await reader.readline()).decode().split()
-		util.logi("request", cmd_list)
+		logger.info("request\t" + str(cmd_list))
 		if len(cmd_list) == 0:
 			continue
 
 		try:
 			result = await on_command(cmd_list)
 			if result is None:
-				util.logi("no response")
+				logger.info("no response")
 			else:
-				util.logi("response", result)
+				logger.info("response\t" + str(result))
 				await write_func(json.dumps(result, ensure_ascii = False))
 
 		except Exception as e:
-			util.handle_exception(e, "exception on processing request")
+			logger.exception("exception on processing request")
+			util.on_exception(e)
 			await write_func(type(e).__name__ + ' ' + str(e))
 
 	writer.close()
@@ -346,12 +343,12 @@ async def main(args):
 		usr = User(uid)
 		name = item.get("name", None) or (await usr.get_user_info()).get("name")
 
-		util.logv("add user " + name, "uid " + str(uid))
+		logger.debug("add user %s, uid %d", name, uid)
 		monitor = user_monitor(usr, name)
 
 		for key in ["live", "dynamic", "video"]:
 			cfg = item.get(key)
-			util.logv("configured " + key, cfg)
+			logger.debug("configured %s\t%s", key, str(cfg))
 			if cfg is True:
 				cfg = ["true"]
 			if cfg:

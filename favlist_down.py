@@ -2,42 +2,45 @@
 
 import os
 import re
+import logging
 from bilibili_api import favorite_list
 import util
 import bv_down
 
+logger = logging.getLogger(__name__)
+
 async def download(mid, path = None, credential = None):
 	path = util.opt_path(path)
 
-	util.logv("fetching favlist " + str(mid) + " into " + path + " auth " + ("yes" if credential else "no"))
+	logger.debug("fetching favlist %d into %s auth %x", mid, path, bool(credential))
 	page_index = 1
 	await util.stall()
-	util.logv("fetching page " + str(page_index))
+	logger.debug("fetching page %d", page_index)
 	favlist_head = await favorite_list.get_video_favorite_list_content(mid, credential = credential, page = page_index)
-	util.logt(favlist_head)
+	logger.log(util.LOG_TRACE, favlist_head)
 	info = favlist_head.get("info")
 	assert(info.get("id") == mid)
 
 	media_list = favlist_head.get("medias")
 	count = info.get("media_count")
-	util.logi("favlist " + str(mid) + " name " + info.get("title") + " creator " + info.get("upper").get("name") + " count " + str(count))
+	logger.info("favlist %d, name %s, creator %s, count %d", mid, info.get("title"), info.get("upper").get("name"), count)
 
 	while len(media_list) < count:
-		util.logv("media " + str(len(media_list)) + '/' + str(count))
+		logger.debug("media %d/%d", len(media_list), count)
 		page_index = page_index + 1
 		await util.stall()
-		util.logv("fetching page " + str(page_index))
+		logger.debug("fetching page %d", page_index)
 		favlist_part = await favorite_list.get_video_favorite_list_content(mid, credential = credential, page = page_index)
-		util.logt(favlist_part)
+		logger.log(util.LOG_TRACE, favlist_part)
 		assert(favlist_part.get("info").get("id") == mid)
 		media_list = media_list + favlist_part.get("medias")
 
-	util.logv("finished fetching favlist " + str(mid))
-	util.logt(media_list)
+	logger.debug("finished fetching favlist %d", mid)
+	logger.log(util.LOG_TRACE, media_list)
 	favlist_head["medias"] = media_list
 
 	info_file = path + str(mid) + ".json"
-	util.logv("save favlist as " + info_file)
+	logger.debug("save favlist as " + info_file)
 	util.save_json(favlist_head, info_file)
 
 	return media_list
@@ -49,11 +52,11 @@ async def dump_favlist(uid, filter = None, path = None, credential = None, mode 
 
 	path = util.opt_path(path)
 
-	util.logv("downloading favlist from user " + str(uid) + " filter " + str(filter) + " into " + path + " mode " + mode + " auth " + ("yes" if credential else "no"))
+	logger.debug("downloading favlist from user %d into %s, filter %s, mode %s, auth %x", uid, path, str(filter), mode, bool(credential))
 
 	await util.stall()
 	user_favlist = await favorite_list.get_video_favorite_list(uid, credential = credential)
-	util.logt(user_favlist)
+	logger.log(util.LOG_TRACE, user_favlist)
 	assert(user_favlist.get("count") == len(user_favlist.get("list")))
 	util.mkdir(path + "favlist")
 
@@ -61,23 +64,23 @@ async def dump_favlist(uid, filter = None, path = None, credential = None, mode 
 	for i, v in enumerate(user_favlist.get("list")):
 		title = v.get("title")
 		if filter and not re.fullmatch(filter, title):
-			util.logv("skip favlist " + title)
+			logger.debug("skip favlist " + title)
 			continue
-		util.logi("downloading favlist " + title)
+		logger.info("downloading favlist " + title)
 		favlist = await download(v.get("id"), path = path + "favlist", credential = credential)
 		if mode == "skip":
 			continue
 
-		util.logv(str(len(favlist)) + " records in favlist " + title)
+		logger.debug("%d records in favlist %s", len(favlist), title)
 		for _, bv in enumerate(favlist):
 			bv_table[bv.get("bvid")] = True
 
-	util.logt(bv_table)
+	logger.log(util.LOG_TRACE, bv_table)
 	if mode == "skip":
-		util.logi("skip downloading videos")
+		logger.info("skip downloading videos")
 		return
 
-	util.logi("need to download " + str(len(bv_table)) + " videos")
+	logger.info("need to download %d videos", len(bv_table))
 	util.mkdir(path + "video")
 	finished_count = 0
 	for bv in bv_table.keys():
@@ -86,7 +89,7 @@ async def dump_favlist(uid, filter = None, path = None, credential = None, mode 
 			finished_count += 1
 		print(bv, res, flush = True)
 
-	util.logi("finished downloading favlist", str(finished_count) + '/' + str(len(bv_table)))
+	logger.info("finished downloading favlist %d/%d",finished_count, len(bv_table))
 
 
 async def main(args):
@@ -96,16 +99,17 @@ async def main(args):
 
 	parser = re.compile(r"(\d+)(?::(.+))?")
 
-	util.logv(args.inputs)
-	for i, v in enumerate(args.inputs):
-		match = parser.fullmatch(v)
-		uid = match.group(1)
+	logger.debug(args.inputs)
+	for fav in args.inputs:
+		match = parser.fullmatch(fav)
+		uid = int(match.group(1))
 		filter = match.group(2)
-		util.logv(str(uid) + ' ' + str(filter))
+		logger.debug("%d %s", uid, str(filter))
 		try:
 			await dump_favlist(uid, filter, path = args.dest, mode = args.mode, credential = credential)
 		except Exception as e:
-			util.handle_exception(e, "failed to download favlist " + v)
+			logger.exception("failed to download favlist " + fav)
+			util.on_exception(e)
 
 if __name__ == "__main__":
 	args = util.parse_args([

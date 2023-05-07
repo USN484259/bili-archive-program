@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
 import os
+import logging
 from bilibili_api import user, video
 import util
 import bv_down
 
+logger = logging.getLogger(__name__)
 
 async def fetch_season(usr, season_id, exclude_list = {}):
 	page_index = 1
@@ -16,20 +18,20 @@ async def fetch_season(usr, season_id, exclude_list = {}):
 	season_count = season_meta.get("total")
 	season_name = season_meta.get("name")
 
-	util.logv("season " + str(season_id), season_name, "count " + str(season_count))
-	util.logt(season_info)
+	logger.debug("season %d, %s, count %d", season_id, season_name, season_count)
+	logger.log(util.LOG_TRACE, season_info)
 
 	if season_name in exclude_list:
-		util.logw("excluded", season_name)
+		logger.warning("excluded " + season_name)
 		return
 
 	while (len(season_list) < season_count):
-		util.logv("videos " + str(len(season_list)) + '/' + str(season_count))
+		logger.debug("videos %d/%d", len(season_list), season_count)
 		page_index += 1
 		await util.stall()
-		util.logv("fetching page " + str(page_index))
+		logger.debug("fetching page %d", page_index)
 		season_part = await usr.get_channel_videos_season(season_id, pn = page_index)
-		util.logt(season_part)
+		logger.log(util.LOG_TRACE, season_part)
 		season_list += season_part.get("archives")
 
 	assert(len(season_info.get("archives")) == season_count)
@@ -47,20 +49,20 @@ async def fetch_series(usr, series_meta, exclude_list = {}):
 	series_count = series_meta.get("total")
 	series_name = series_meta.get("name")
 
-	util.logv("series " + str(series_id), series_name, "count " + str(series_count))
-	util.logt(series_info)
+	logger.debug("series %d, %s, count %d", series_id, series_name, series_count)
+	logger.log(util.LOG_TRACE, series_info)
 
 	if series_name in exclude_list:
-		util.logw("excluded", series_name)
+		logger.warning("excluded " + series_name)
 		return
 
 	while (len(series_list) < series_count):
-		util.logv("videos " + str(len(series_list)) + '/' + str(series_count))
+		logger.debug("videos %d/%d", len(series_list), series_count)
 		page_index += 1
 		await util.stall()
-		util.logv("fetching page " + str(page_index))
+		logger.debug("fetching page %d", page_index)
 		series_part = await usr.get_channel_videos_series(series_id, pn = page_index)
-		util.logt(series_part)
+		logger.log(util.LOG_TRACE, series_part)
 		series_list += series_part.get("archives")
 
 	assert(len(series_info.get("archives")) == series_count)
@@ -70,44 +72,44 @@ async def fetch_series(usr, series_meta, exclude_list = {}):
 async def download(uid, path = None, credential = None):
 	path = util.opt_path(path)
 
-	util.logv("fetching user " + str(uid) + " into " + path + " auth " + ("yes" if credential else "no"))
+	logger.debug("fetching user %d into %s, auth %x", uid, path, bool(credential))
 
 	await util.stall()
 	usr = user.User(uid = uid, credential = credential)
 	info = await usr.get_user_info()
-	util.logt(info)
+	logger.log(util.LOG_TRACE, info)
 
 	util.mkdir(path + str(uid))
-	util.logi("downloading " + str(uid) + '\t' + info.get("name", ""))
+	logger.info("downloading %d, %s", uid, info.get("name", ""))
 
-	util.logv("fetching head pic")
+	logger.debug("fetching head pic")
 	await util.fetch(info.get("face"), path + str(uid) + os.path.sep + "head.jpg")
 
-	util.logv("fetching top banner")
+	logger.debug("fetching top banner")
 	await util.fetch(info.get("top_photo"), path + str(uid) + os.path.sep + "banner.jpg")
 
 	if info.get("pendant").get("pid") > 0:
-		util.logv("fetching pendant")
+		logger.debug("fetching pendant")
 		await util.fetch(info.get("pendant").get("image"), path + str(uid) + os.path.sep + "pendant.png")
 
 	page_index = 1
 	await util.stall()
-	util.logv("fetching page " + str(page_index))
+	logger.debug("fetching page %d", page_index)
 	video_head = await usr.get_videos(pn = page_index)
-	util.logt(video_head)
+	logger.log(util.LOG_TRACE, video_head)
 	video_count = video_head.get("page").get("count")
 	video_list = video_head.get("list").get("vlist")
 
 	while len(video_list) < video_count:
-		util.logv("videos " + str(len(video_list)) + '/' + str(video_count))
+		logger.debug("videos %d/%d", len(video_list), video_count)
 		page_index += 1
 		await util.stall()
-		util.logv("fetching page " + str(page_index))
+		logger.debug("fetching page %d", page_index)
 		video_part = await usr.get_videos(pn = page_index)
-		util.logt(video_part)
+		logger.log(util.LOG_TRACE, video_part)
 		video_list += video_part.get("list").get("vlist")
 
-	util.logv("fetching channels")
+	logger.debug("fetching channels")
 	await util.stall()
 	channels = await usr.get_channel_list()
 
@@ -116,20 +118,20 @@ async def download(uid, path = None, credential = None):
 
 	season_list = []
 	for season in channels.get("items_lists").get("seasons_list"):
-		util.logv("fetching season", season.get("meta").get("name"))
+		logger.debug("fetching season %s", season.get("meta").get("name"))
 		season_obj = await fetch_season(usr, season.get("meta").get("season_id"), exclude_list)
 		if season_obj:
 			season_list.append(season_obj)
 
 	series_list = []
 	for series in channels.get("items_lists").get("series_list"):
-		util.logv("fetching series", series.get("meta").get("name"))
+		logger.debug("fetching series %s", series.get("meta").get("name"))
 		series_obj = await fetch_series(usr, series.get("meta"), exclude_list)
 		if series_obj:
 			series_list.append(series_obj)
 
-	util.logv("finished fetching user " + str(uid))
-	util.logt(video_list)
+	logger.debug("finished fetching user %d", uid)
+	logger.log(util.LOG_TRACE, video_list)
 
 	assert("video_list" not in info)
 	info["video_list"] = video_list
@@ -138,10 +140,10 @@ async def download(uid, path = None, credential = None):
 	assert("series_list" not in info)
 	info["series_list"] = series_list
 
-	util.logv("save user info")
+	logger.debug("save user info")
 	util.save_json(info, path + str(uid) + os.path.sep + "info.json")
 
-	util.logv("finished " + str(uid))
+	logger.debug("finished %d", uid)
 	return video_list, season_list, series_list
 
 
@@ -151,18 +153,19 @@ async def dump_user(uid_list, path = None, credential = None, mode = None):
 
 	path = util.opt_path(path)
 	
-	util.logv("downloading " + str(len(uid_list)) + "users into " + path + " mode " + mode + " auth " + ("yes" if credential else "no"))
+	logger.debug("downloading %d users into %s, mode %s, auth %x", len(uid_list), path, mode, bool(credential))
 	util.mkdir(path + "user")
 
 	bv_table = dict()
-	for i, uid in enumerate(uid_list):
+	for uid_str in uid_list:
 		try:
-			util.logi("downloading user " + str(uid))
+			uid = int(uid_str)
+			logger.info("downloading user %d", uid)
 			video_list, season_list, series_list = await download(uid, path = path + "user", credential = credential)
 			if mode == "skip":
 				continue
 
-			util.logv(str(len(video_list)) + " videos from user " + str(uid))
+			logger.debug("%d videos from user %d", len(video_list), uid)
 			for bv in video_list:
 				bv_table[bv.get("bvid")] = True
 
@@ -175,14 +178,15 @@ async def dump_user(uid_list, path = None, credential = None, mode = None):
 					bv_table[bv.get("bvid")] = True
 
 		except Exception as e:
-			util.handle_exception(e, "failed to get user " + str(uid))
+			logger.exception("failed to get user " + str(uid))
+			util.on_exception(e)
 	
-	util.logt(bv_table)
+	logger.log(util.LOG_TRACE, bv_table)
 	if mode == "skip":
-		util.logi("skip downloading videos")
+		logger.info("skip downloading videos")
 		return
 	
-	util.logi("need to download " + str(len(bv_table)) + " videos")
+	logger.info("need to download %d videos", len(bv_table))
 	util.mkdir(path + "video")
 	finished_count = 0
 	for bv in bv_table.keys():
@@ -191,7 +195,7 @@ async def dump_user(uid_list, path = None, credential = None, mode = None):
 			finished_count += 1
 		print(bv, res, flush = True)
 
-	util.logi("finished downloading users", str(finished_count) + '/' + str(len(bv_table)))
+	logger.info("finished downloading users %d/%d", finished_count, len(bv_table))
 
 
 async def main(args):
@@ -199,7 +203,7 @@ async def main(args):
 	if args.auth:
 		credential = await util.credential(args.auth)
 
-	util.logv(args.inputs)
+	logger.debug(args.inputs)
 	await dump_user(args.inputs, path = args.dest, mode = args.mode, credential = credential)
 
 
