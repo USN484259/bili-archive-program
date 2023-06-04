@@ -7,6 +7,7 @@ import time
 import json
 import logging
 import asyncio
+import multiprocessing
 from bilibili_api.user import User
 from bilibili_api.live import LiveRoom
 import util
@@ -67,11 +68,17 @@ class content_monitor_base:
 		self.task.add_done_callback(asyncio.Task.result)
 
 
+def exec_record(room, path, uname, title):
+	loop = asyncio.new_event_loop()
+	asyncio.set_event_loop(loop)
+	loop.run_until_complete(live_rec.record(room, path, uname, title))
+
+
 class content_monitor_live(content_monitor_base):
 	def __init__(self):
 		super().__init__()
+		self.proc = None
 		self.state = "idle"
-		self.rec_name = None
 
 	def set(self, vargs):
 		try:
@@ -88,54 +95,59 @@ class content_monitor_live(content_monitor_base):
 
 		return result
 
-	async def check(self, usr):
+	async def cancel(self):
+		if self.proc is not None:
+			self.proc.terminate()
+			self.proc.close()
+			self.proc = None
+
+	async def step(self, usr):
+		if self.proc is not None:
+			if self.proc.is_alive():
+				logger.debug("task running, skip")
+				return
+
+			logger.debug("task done, exitcode %d", self.proc.exitcode)
+			self.proc.close()
+			self.proc = None
+
 		if not self.config:
 			return
 
-		logger.debug("monitoring live room")
+		logger.info("checking live room of user %d", usr.get_uid())
+
 		live_info = await usr.get_live_info()
 		logger.log(util.LOG_TRACE, live_info)
 		room_info = live_info.get("live_room")
 		if not room_info:
-			logger.debug("no live room, skip")
+			logger.warn("live room not available")
 			return
 
 		room_id = room_info.get("roomid")
 		live_status = room_info.get("liveStatus")
-		logger.debug("live room %d, status %d", room_id, live_status)
+		logger.info("live room %d, status %d", room_id, live_status)
 		if live_status != 1:
 			self.state = "idle"
-			self.rec_name = None
 			return
 
 		if self.state == "idle":
 			tm = time.localtime()
 			if self.config == True or live_rec.match_schedule(self.config, tm):
-				self.rec_name = util.opt_path(monitor_root.get("dest")) + "live" + os.path.sep + live_rec.make_record_name(live_info, room_info, tm)
 				self.state = "record"
-				logger.debug("new record for room %d, %s", room_id, self.rec_name)
-				return live_info
+				logger.info("start recording %d", room_id)
 			else:
 				self.state = "skip"
-				logger.debug("schedule not match, skip recording room %d", room_id)
+				logger.info("schedule miss, skip recording %d", room_id)
 				return
 
-		elif self.state == "record":
-			logger.debug("continue recording room %d", room_id)
-			return live_info
-
-	async def worker(self, usr, live_info):
-		room_id = live_info.get("live_room").get("roomid")
-		room = LiveRoom(room_id)
-		util.mkdir(self.rec_name)
-		task_danmaku = asyncio.create_task(live_rec.record_danmaku(room, self.rec_name))
-		task_danmaku.add_done_callback(asyncio.Task.result)
-		try:
-			logger.debug("start recording room %d", room_id)
-			await live_rec.record(room, self.rec_name)
-		finally:
-			logger.debug("stop recording room %d", room_id)
-			task_danmaku.cancel()
+		if self.state == "record":
+			logger.debug("start recording %d", room_id)
+			rec_path = os.path.join(util.opt_path(monitor_root.get("dest")), "live")
+			util.mkdir(rec_path)
+			room = LiveRoom(room_id)
+			# live_rec.record(room, rec_path, live_info.get("name"), room_info.get("title"))
+			self.proc = multiprocessing.Process(target = exec_record, args = (room, rec_path, live_info.get("name"), room_info.get("title")), daemon = True)
+			self.proc.start()
 
 
 class content_monitor_dynamic(content_monitor_base):
@@ -370,6 +382,5 @@ if __name__ == "__main__":
 		(("-u", "--auth"), {}),
 		(("-c", "--config"), {})
 	])
-
 	util.run(main(args))
 
