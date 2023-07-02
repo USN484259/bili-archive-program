@@ -6,14 +6,26 @@ import asyncio
 import re
 import json
 import logging
-from aiofile import async_open
 from collections import deque
+import bilibili_api
 from bilibili_api import live, user
 import util
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("live_rec")
 
 schedule_pattern = re.compile(r"(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?[-~]+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?")
+
+
+async def fetch_stream(url, sink_list):
+	sess = bilibili_api.get_session()
+	logger.debug("streaming %s with %d sinks", url, len(sink_list))
+	async with sess.stream("GET", url, headers = util.agent, timeout = util.http_timeout) as resp:
+		logger.debug(resp)
+		resp.raise_for_status()
+
+		async for chunk in resp.aiter_bytes():
+			for sink in sink_list:
+				sink.write(chunk)
 
 
 async def worker_danmaku(room, path, filename = "danmaku.json"):
@@ -22,7 +34,7 @@ async def worker_danmaku(room, path, filename = "danmaku.json"):
 		rec_name = path + filename
 		logger.debug("record live danmaku into " + rec_name)
 		conn = live.LiveDanmaku(room.room_display_id)
-		async with async_open(rec_name, "a") as f:
+		with open(rec_name, "a") as f:
 			mutex = asyncio.Lock()
 			queue = deque()
 			cond = asyncio.Condition()
@@ -66,7 +78,7 @@ async def worker_danmaku(room, path, filename = "danmaku.json"):
 
 				async with mutex:
 					logger.debug(cmd)
-					await f.write(json.dumps(data, ensure_ascii = False) + '\n')
+					f.write(json.dumps(data, ensure_ascii = False) + '\n')
 
 				for meta in data.get("info", [[]])[0]:
 					if not isinstance(meta, dict):
@@ -106,12 +118,20 @@ async def worker_danmaku(room, path, filename = "danmaku.json"):
 			pass
 
 
-async def worker_record(room, path, resolution = live.ScreenResolution.ORIGINAL):
+async def worker_record(room, path, mode, resolution = live.ScreenResolution.ORIGINAL):
 	try:
-		logger.debug("record live into %s, resolution %s", path, str(resolution))
+		logger.debug("record live into %s, mode %s, resolution %s", path, mode, str(resolution))
+		if mode == "remux" or mode == "both":
+			try:
+				from gst_remuxer import GstRemuxer
+			except:
+				logger.exception("failed in loading remuxer")
+				logger.warning("no GStreamer, fallback to save mode")
+				mode = "save"
 
 		while True:
 			start_time = time.time_ns()
+			sink_list = []
 			try:
 				play_info = await room.get_room_play_info()
 				logger.log(util.LOG_TRACE, play_info)
@@ -121,12 +141,37 @@ async def worker_record(room, path, resolution = live.ScreenResolution.ORIGINAL)
 				info = await room.get_room_play_url(resolution)
 				logger.log(util.LOG_TRACE, info)
 				url = info.get("durl")[0].get("url")
-				filename = str(start_time // util.sec_to_ns) + ".flv"
-				logger.debug("record file " + filename)
-				await util.fetch(url, os.path.join(path, filename), mode = "stream")
+
+				save_flv = (mode != "remux")
+				if mode == "remux" or mode == "both":
+					filename = str(start_time // util.sec_to_ns) + ".mp4"
+					logger.debug("remux file " + filename)
+					try:
+						remuxer = GstRemuxer(os.path.join(path, filename))
+						remuxer.start()
+						sink_list.append(remuxer)
+					except:
+						logger.exception("exception in creating remuxer")
+						if mode == "remux":
+							logger.warning("remux failed, fallback to save mode")
+							save_flv = True
+
+				if save_flv:
+					filename = str(start_time // util.sec_to_ns) + ".flv"
+					logger.debug("record file " + filename)
+					file_sink = open(os.path.join(path, filename), mode = "wb")
+					sink_list.append(file_sink)
+
+
+				await fetch_stream(url, sink_list)
+				# await util.fetch(url, os.path.join(path, filename), mode = "stream")
 			except Exception as e:
 				logger.exception("exception on recording")
 				util.on_exception(e)
+
+			finally:
+				for sink in sink_list:
+					sink.close()
 
 			stop_time = time.time_ns()
 			diff_time = stop_time - start_time
@@ -177,7 +222,7 @@ def match_schedule(schedule, tm):
 	return False
 
 
-async def record(room, path, uname, title):
+async def record(room, path, uname, title, mode = "save"):
 	rec_path = os.path.join(path, uname + '_' + title + '_' + time.strftime("%y_%m_%d_%H_%M"))
 	logger.info("recording liveroom %d into %s", await room.get_room_id(), rec_path)
 	util.mkdir(rec_path)
@@ -185,7 +230,7 @@ async def record(room, path, uname, title):
 	task_danmaku.add_done_callback(asyncio.Task.result)
 
 	try:
-		await worker_record(room, rec_path)
+		await worker_record(room, rec_path, mode)
 	finally:
 		task_danmaku.cancel()
 		try:
@@ -200,11 +245,12 @@ async def main(args):
 	usr = user.User(room_info.get("uid"))
 	user_info = await usr.get_user_info()
 
-	await record(room, util.opt_path(args.dest), user_info.get("name"), room_info.get("title"))
+	await record(room, util.opt_path(args.dest), user_info.get("name"), room_info.get("title"), args.mode)
 
 
 if __name__ == "__main__":
 	args = util.parse_args([
 		(("room",), {"type" : int}),
+		(("-m", "--mode"), {"choices": ["save", "remux", "both"], "default": "save"}),
 	])
 	util.run(main(args))

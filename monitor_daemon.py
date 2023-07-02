@@ -13,7 +13,7 @@ from bilibili_api.live import LiveRoom
 import util
 import live_rec
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("monitor_daemon")
 
 
 class content_monitor_base:
@@ -68,10 +68,11 @@ class content_monitor_base:
 		self.task.add_done_callback(asyncio.Task.result)
 
 
-def exec_record(room, path, uname, title):
-	loop = asyncio.new_event_loop()
-	asyncio.set_event_loop(loop)
-	loop.run_until_complete(live_rec.record(room, path, uname, title))
+def exec_record(room, path, uname, title, mode):
+	# loop = asyncio.new_event_loop()
+	# asyncio.set_event_loop(loop)
+	# loop.run_until_complete(live_rec.record(room, path, uname, title, mode))
+	util.run(live_rec.record(room, path, uname, title, mode))
 
 
 class content_monitor_live(content_monitor_base):
@@ -120,7 +121,7 @@ class content_monitor_live(content_monitor_base):
 		logger.log(util.LOG_TRACE, live_info)
 		room_info = live_info.get("live_room")
 		if not room_info:
-			logger.warn("live room not available")
+			logger.warning("live room not available")
 			return
 
 		room_id = room_info.get("roomid")
@@ -141,12 +142,20 @@ class content_monitor_live(content_monitor_base):
 				return
 
 		if self.state == "record":
+			global monitor_root
 			logger.debug("start recording %d", room_id)
 			rec_path = os.path.join(util.opt_path(monitor_root.get("dest")), "live")
 			util.mkdir(rec_path)
 			room = LiveRoom(room_id)
 			# live_rec.record(room, rec_path, live_info.get("name"), room_info.get("title"))
-			self.proc = multiprocessing.Process(target = exec_record, args = (room, rec_path, live_info.get("name"), room_info.get("title")), daemon = True)
+			self.proc = multiprocessing.Process(target = exec_record, args = (
+					room,
+					rec_path,
+					live_info.get("name"),
+					room_info.get("title"),
+					monitor_root.get("live_mode", "save")
+				), daemon = True)
+
 			self.proc.start()
 
 
@@ -348,6 +357,8 @@ async def main(args):
 
 	if args.dest:
 		monitor_root["dest"] = util.opt_path(args.dest)
+	else:
+		monitor_root["dest"] = util.opt_path(monitor_root.get("dest", "."))
 
 	monitor_list = []
 	for item in monitor_root.get("list"):

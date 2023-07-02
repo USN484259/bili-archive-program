@@ -1,3 +1,2 @@
 bilibili-api-python
-aiofile
 

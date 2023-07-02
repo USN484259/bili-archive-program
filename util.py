@@ -8,7 +8,6 @@ import traceback
 import argparse
 import json
 import logging
-from aiofile import async_open
 import bilibili_api
 from bilibili_api import Credential
 
@@ -16,7 +15,7 @@ LOG_TRACE = 2
 
 logging.addLevelName(LOG_TRACE, "TRACE")
 logging.basicConfig(level = 0, format = "%(asctime)s\t%(name)s\t%(levelname)s\t%(message)s")
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("util")
 
 agent = {
 	"User-Agent": "Mozilla/5.0",
@@ -141,15 +140,20 @@ def on_exception(e):
 
 def run(func):
 	# return asyncio.get_event_loop().run_until_complete(func)
-	return bilibili_api.sync(func)
+	# return bilibili_api.sync(func)
+	try:
+		return asyncio.run(func)
+	except:
+		logger.exception("excption in asyncio::run")
+
 
 
 async def credential(auth_file):
 	parser = re.compile(r"(\S+)[\s\=\:]+(\S+)\s*")
 	info = dict()
 	logger.debug("auth file at " + auth_file)
-	async with async_open(auth_file, "r") as f:
-		async for line in f:
+	with open(auth_file, "r") as f:
+		for line in f:
 			match = parser.fullmatch(line)
 			if match:
 				logger.log(0, "got key " + match.group(1))
@@ -188,7 +192,7 @@ def save_json(obj, path):
 		json.dump(obj, f, indent = '\t', ensure_ascii = False)
 
 
-async def fetch(url, path, mode = "file"):
+async def fetch(url, path):
 	sess = bilibili_api.get_session()
 	logger.log(0, "fetching " + url + " into " + path)
 	async with sess.stream("GET", url, headers=agent, timeout = http_timeout) as resp:
@@ -196,37 +200,29 @@ async def fetch(url, path, mode = "file"):
 		resp.raise_for_status()
 
 		file_name = path
-		length = None
 		file_length = None
-		file_mode = None
-		if mode == "file":
-			file_mode = "wb"
-			length = resp.headers.get('content-length')
-			if length:
-				logger.log(0, "content length " + length)
-				length = int(length)
-			else:
-				logger.warning("missing content-length")
-
-			if tmp_postfix:
-				file_name = path + tmp_postfix
-				logger.debug("using stage file " + file_name)
-		elif mode == "stream":
-			file_mode = "ab"
+		length = resp.headers.get('content-length')
+		if length:
+			logger.log(0, "content length " + length)
+			length = int(length)
 		else:
-			raise Exception("fetch: unknown mode " + mode)
+			logger.warning("missing content-length")
 
-		async with async_open(file_name, file_mode) as f:
+		if tmp_postfix:
+			file_name = path + tmp_postfix
+			logger.debug("using stage file " + file_name)
+
+		with open(file_name, "wb") as f:
 			last_timestamp = None
-			if mode == "file" and bandwidth_limit:
+			if bandwidth_limit:
 				logger.debug("bandwidth limit " + str(bandwidth_limit) + " byte/sec")
 				last_timestamp = time.monotonic_ns()
 
 			async for chunk in resp.aiter_bytes():
 				logger.log(0, '*', raw = True)
-				await f.write(chunk)
+				f.write(chunk)
 
-				if mode == "file" and bandwidth_limit:
+				if bandwidth_limit:
 					cur_timestamp = time.monotonic_ns()
 					time_diff = cur_timestamp - last_timestamp
 					expect_time = sec_to_ns * len(chunk) / bandwidth_limit
@@ -240,15 +236,14 @@ async def fetch(url, path, mode = "file"):
 			file_length = f.tell()
 			logger.debug("EOF with file length " + str(file_length))
 
-	if mode == "file":
-		if length and file_length != length:
-			logger.warning("%s size mismatch, expect %d got %d",file_name, length, file_length)
-			if length > file_length:
-				raise Exception("unexpected EOF " + path)
+	if length and file_length != length:
+		logger.warning("%s size mismatch, expect %d got %d",file_name, length, file_length)
+		if length > file_length:
+			raise Exception("unexpected EOF " + path)
 
-		if tmp_postfix:
-			logger.debug("move " + file_name + " to " + path)
-			os.replace(file_name, path)
+	if tmp_postfix:
+		logger.debug("move " + file_name + " to " + path)
+		os.replace(file_name, path)
 
 	return file_length
 
