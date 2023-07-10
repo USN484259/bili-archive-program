@@ -146,7 +146,7 @@ class content_monitor_live(content_monitor_base):
 			logger.debug("start recording %d", room_id)
 			rec_path = os.path.join(util.opt_path(monitor_root.get("dest")), "live")
 			util.mkdir(rec_path)
-			room = LiveRoom(room_id)
+			room = LiveRoom(room_id, monitor_root.get("credential"))
 			# live_rec.record(room, rec_path, live_info.get("name"), room_info.get("title"))
 			self.proc = multiprocessing.Process(target = exec_record, args = (
 					room,
@@ -359,6 +359,9 @@ async def main(args):
 		monitor_root["dest"] = util.opt_path(args.dest)
 	else:
 		monitor_root["dest"] = util.opt_path(monitor_root.get("dest", "."))
+
+	if args.auth:
+		monitor_root["credential"] = await util.credential(args.auth)
 
 	monitor_list = []
 	for item in monitor_root.get("list"):

@@ -107,7 +107,9 @@ async def download(uid, path = None, credential = None):
 		logger.debug("fetching page %d", page_index)
 		video_part = await usr.get_videos(pn = page_index)
 		logger.log(util.LOG_TRACE, video_part)
-		video_list += video_part.get("list").get("vlist")
+		part_list = video_part.get("list").get("vlist")
+		assert(len(part_list) > 0)
+		video_list += part_list
 
 	logger.debug("fetching channels")
 	await util.stall()
