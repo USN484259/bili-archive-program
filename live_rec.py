@@ -172,7 +172,9 @@ async def worker_record(room, path, mode, resolution = live.ScreenResolution.ORI
 			try:
 				play_info = await room.get_room_play_info()
 				logger.log(util.LOG_TRACE, play_info)
-				if play_info.get("live_status") != 1:
+				status = play_info.get("live_status")
+				logger.info("room %d, status %d", play_info.get("room_id"), status)
+				if status != 1:
 					break
 
 				info = await room.get_room_play_url(resolution)

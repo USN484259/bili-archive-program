@@ -11,8 +11,7 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 |	`favlist_down`	|	download videos in favorite-lists	|
 |	`verify`	|	check integrity of downloaded videos	|
 |	`live_rec`	|	record live-stream & chat of given live-room	|
-|	`monitor_daemon`|	daemon process to auto record & download	|
-|	`monitor_ctrl`	|	interface to change daemon config on the fly	|
+|	`monitor`	|	daemon process to auto record live-room	|
 |	`build_index`	|	utility to build html index for videos	|
 
 ### Mandatory Dependency

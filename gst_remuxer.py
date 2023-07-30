@@ -13,7 +13,7 @@ logger = logging.getLogger("gst_remuxer")
 
 class GstRemuxer(Thread):
 	def __init__(self, filename):
-		Thread.__init__(self)
+		Thread.__init__(self, daemon = True)
 		if Gst.is_initialized() or Gst.init_check(None):
 			pass
 		else:

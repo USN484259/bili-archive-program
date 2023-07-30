@@ -12,9 +12,10 @@ import bilibili_api
 from bilibili_api import Credential
 
 LOG_TRACE = 2
+log_format = "%(asctime)s\t%(process)d\t%(name)s\t%(levelname)s\t%(message)s"
 
 logging.addLevelName(LOG_TRACE, "TRACE")
-logging.basicConfig(level = 0, format = "%(asctime)s\t%(name)s\t%(levelname)s\t%(message)s")
+logging.basicConfig(level = 0, format = log_format)
 logger = logging.getLogger("util")
 
 agent = {
@@ -98,6 +99,7 @@ def parse_args(arg_list = []):
 	parser.add_argument("-v", "--verbose", action = "count", default = 0)
 	parser.add_argument("-q", "--quiet", action = "count", default = 0)
 	parser.add_argument("-w", "--bandwidth")
+	parser.add_argument("-l", "--log")
 
 	for args, kwargs in arg_list:
 		parser.add_argument(*args, **kwargs)
@@ -106,6 +108,11 @@ def parse_args(arg_list = []):
 
 	log_level = logging.INFO + 10 * (args.quiet - args.verbose)
 	logging.getLogger().setLevel(log_level)
+
+	if args.log:
+		handler = logging.FileHandler(args.log, delay = True)
+		handler.setFormatter(logging.Formatter(log_format))
+		logging.getLogger().addHandler(handler)
 
 	if args.timeout:
 		http_timeout = int(args.timeout)
@@ -146,6 +153,26 @@ def run(func):
 	except:
 		logger.exception("excption in asyncio::run")
 
+
+async def wait_online():
+	sess = bilibili_api.get_session()
+	count = 0
+	while True:
+		try:
+			count += 1
+			logger.info("waiting online %d", count)
+			await stall()
+			resp = await sess.head("https://www.bilibili.com")
+			resp.raise_for_status()
+
+			logger.info("already online")
+			return
+
+		except httpx.HTTPError:
+			pass
+		except Exception:
+			logger.exception("exception in waiting online")
+			raise
 
 
 async def credential(auth_file):

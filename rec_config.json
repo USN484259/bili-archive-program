@@ -1,66 +1,36 @@
 {
-	"interval" : 30,
-	"live_mode" : "both",
-	"list" : [
-		{
-			"uid" : 198297,
-			"name" : "冰糖",
-			"live" : true
-		},
-		{
-			"uid" : 53456,
-			"name" : "Warma",
-			"live" : true
-		},
-		{
-			"uid" : 108845996,
-			"name" : "瑞安",
-			"live" : true
-		},
-		{
-			"uid" : 3379951,
-			"name" : "ilem",
-			"live" : true
-		},
-		{
-			"uid" : 2147476554,
-			"name" : "狗哥",
-			"live" : true
-		},
-		{
-			"uid" : 198263459,
-			"name" : "祈里",
-			"live" : true
-		},
-		{
-			"uid" : 508963009,
-			"name" : "Hiiro",
-			"live" : true
-		},
-		{
-			"uid" : 2100679,
-			"name" : "醒爷",
-			"live" : true
-		},
-		{
-			"uid" : 2073012767,
-			"name" : "もも",
-			"live" : true
-		},
-		{
-			"uid" : 387636363,
-			"name" : "るる",
-			"live" : true
-		},
-		{
-			"uid" : 477792,
-			"name" : "雪狐",
-			"live" : false
-		},
-		{
-			"uid" : 234782,
-			"name" : "祈Inory",
-			"live" : true
-		}
-	]
+	"interval":	30,
+	"path":		"/massive/temp/",
+	"mode":		"both",
+	"list":	[{
+		"name":	"Hiiro",
+		"rid":	21919321
+	}, {
+		"name":	"祈里",
+		"rid":	25075490
+	}, {
+		"name":	"Warma",
+		"rid":	59901
+	}, {
+		"name":	"祈Inory",
+		"rid":	766
+	}, {
+		"name":	"野良犬P",
+		"rid":	23131609
+	}, {
+		"name":	"美月もも",
+		"rid":	23698286
+	}, {
+		"name":	"醒爷",
+		"rid":	318
+	}, {
+		"name":	"雫るる",
+		"rid":	21013446
+	}, {
+		"name":	"冰糖IO",
+		"rid":	876396
+	}, {
+		"name":	"ilem",
+		"rid":	544610
+	}]
 }
