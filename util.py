@@ -12,7 +12,7 @@ import bilibili_api
 from bilibili_api import Credential
 
 LOG_TRACE = 2
-log_format = "%(asctime)s\t%(process)d\t%(name)s\t%(levelname)s\t%(message)s"
+log_format = "%(asctime)s\t%(process)d\t%(levelname)s\t%(name)s\t%(message)s"
 
 logging.addLevelName(LOG_TRACE, "TRACE")
 logging.basicConfig(level = 0, format = log_format)

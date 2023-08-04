@@ -3,6 +3,7 @@
 import json
 import asyncio
 import logging
+import multiprocessing
 from bilibili_api import live
 import util
 import live_rec

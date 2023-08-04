@@ -13,8 +13,6 @@ import util
 
 logger = logging.getLogger("live_rec")
 
-schedule_pattern = re.compile(r"(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?[-~]+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?")
-
 
 async def fetch_stream(url, sink_func, *args):
 	logger.debug("start fetching stream %s", url)
@@ -167,15 +165,19 @@ async def worker_record(room, path, mode, resolution = live.ScreenResolution.ORI
 				logger.warning("no GStreamer, fallback to save mode")
 				mode = "save"
 
+		first_time = True
 		while True:
 			start_time = time.time_ns()
 			try:
-				play_info = await room.get_room_play_info()
-				logger.log(util.LOG_TRACE, play_info)
-				status = play_info.get("live_status")
-				logger.info("room %d, status %d", play_info.get("room_id"), status)
-				if status != 1:
-					break
+				if first_time:
+					first_time = False
+				else:
+					play_info = await room.get_room_play_info()
+					logger.log(util.LOG_TRACE, play_info)
+					status = play_info.get("live_status")
+					logger.info("room %d, status %d", play_info.get("room_id"), status)
+					if status != 1:
+						break
 
 				info = await room.get_room_play_url(resolution)
 				logger.log(util.LOG_TRACE, info)
@@ -201,45 +203,17 @@ async def worker_record(room, path, mode, resolution = live.ScreenResolution.ORI
 		raise
 
 
-def parse_schedule(sched):
-	logger.debug("parsing schedule")
-	logger.log(util.LOG_TRACE, sched)
-	result = []
-
-	for v in sched:
-		match = schedule_pattern.fullmatch(v)
-		if not match:
-			raise ValueError()
-
-		head = int(match.group(1)) * 3600 + int(match.group(2)) * 60 + int(match.group(3) or 0)
-		tail = int(match.group(4)) * 3600 + int(match.group(5)) * 60 + int(match.group(6) or 0)
-		if head <= tail:
-			result.append((head, tail))
-		else:
-			result.append((head, 86400))
-			result.append((0, tail))
-
-	logger.log(util.LOG_TRACE, result)
-	return result
-
-
-def match_schedule(schedule, tm):
-	if not schedule:
-		logger.log(util.LOG_TRACE, "empty schedule")
-		return True
-
-	t = tm.tm_hour * 3600 + tm.tm_min * 60 + tm.tm_sec
-
-	for sched in schedule:
-		logger.log(util.LOG_TRACE, "matching schedule (%d, %d) <=> %d", sched[0], sched[1], t)
-		if sched[0] <= t and t <= sched[1]:
-			return True
-	return False
-
-
 async def record(room, path, uname, title, mode = "save"):
 	rec_path = os.path.join(path, uname + '_' + title + '_' + time.strftime("%y_%m_%d_%H_%M"))
 	logger.info("recording liveroom %d, title %s, path %s, mode %s", await room.get_room_id(), title, path, mode)
+
+	play_info = await room.get_room_play_info()
+	status = play_info.get("live_status")
+	logger.info("room %d, status %d", play_info.get("room_id"), status)
+	if status != 1:
+		logger.warning("not streaming, exit")
+		return
+
 	util.mkdir(rec_path)
 	task_danmaku = asyncio.create_task(worker_danmaku(room, rec_path))
 	task_danmaku.add_done_callback(asyncio.Task.result)
