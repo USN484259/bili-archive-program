@@ -38,12 +38,12 @@ async def fetch_stream(url, sink_func, *args):
 			sink.close()
 
 
-async def worker_danmaku(room, path, filename = "danmaku.json"):
+async def worker_danmaku(room, credential, path):
 	try:
 		path = util.opt_path(path)
-		rec_name = path + filename
+		rec_name = os.path.join(path, "danmaku.json")
 		logger.debug("record live danmaku into " + rec_name)
-		conn = live.LiveDanmaku(room.room_display_id)
+		conn = live.LiveDanmaku(room.room_display_id, credential = credential)
 		with open(rec_name, "a") as f:
 			mutex = asyncio.Lock()
 			queue = deque()
@@ -203,10 +203,11 @@ async def worker_record(room, path, mode, resolution = live.ScreenResolution.ORI
 		raise
 
 
-async def record(room, path, uname, title, mode = "save"):
+async def record(rid, credential, path, uname, title, mode = "save"):
 	rec_path = os.path.join(path, uname + '_' + title + '_' + time.strftime("%y_%m_%d_%H_%M"))
-	logger.info("recording liveroom %d, title %s, path %s, mode %s", await room.get_room_id(), title, path, mode)
+	logger.info("recording liveroom %d, title %s, path %s, mode %s", rid, title, path, mode)
 
+	room = live.LiveRoom(rid, credential)
 	play_info = await room.get_room_play_info()
 	status = play_info.get("live_status")
 	logger.info("room %d, status %d", play_info.get("room_id"), status)
@@ -215,7 +216,7 @@ async def record(room, path, uname, title, mode = "save"):
 		return
 
 	util.mkdir(rec_path)
-	task_danmaku = asyncio.create_task(worker_danmaku(room, rec_path))
+	task_danmaku = asyncio.create_task(worker_danmaku(room, credential, rec_path))
 	task_danmaku.add_done_callback(asyncio.Task.result)
 
 	try:
@@ -237,7 +238,7 @@ async def main(args):
 	usr = user.User(room_info.get("uid"))
 	user_info = await usr.get_user_info()
 
-	await record(room, util.opt_path(args.dest), user_info.get("name"), room_info.get("title"), args.mode)
+	await record(args.room, credential, util.opt_path(args.dest), user_info.get("name"), room_info.get("title"), args.mode)
 
 
 if __name__ == "__main__":

@@ -11,8 +11,8 @@ import live_rec
 logger = logging.getLogger("monitor")
 
 
-def exec_record(room, path, uname, title, mode):
-	util.run(live_rec.record(room, path, uname, title, mode))
+def exec_record(rid, credential, path, uname, title, mode):
+	util.run(live_rec.record(rid, credential, path, uname, title, mode))
 
 
 async def check(config, credential):
@@ -55,10 +55,7 @@ async def check(config, credential):
 
 		if not info.get("playurl"):
 			logger.warning("empty play URL")
-
-		# HACK:	workaround to APEX record failure: just skip it
-		if info.get("area_v2_id") in (789, 240):
-			logger.warning("workaround: skip APEX live room")
+			logger.warning("HACK: URLv2-only live room not implemented, skip")
 			continue
 
 		uname = info.get("uname")
@@ -66,10 +63,10 @@ async def check(config, credential):
 		logger.info("start recording %s\troom %d, user %s, title %s", name, rid, uname, title)
 
 		await util.stall()
-		room = live.LiveRoom(rid, credential)
 		task = multiprocessing.Process(
 			target = exec_record, args = (
-				room,
+				rid,
+				credential,
 				config.get("path"),
 				uname,
 				title,

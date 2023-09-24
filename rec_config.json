@@ -1,5 +1,5 @@
 {
-	"interval":	30,
+	"interval":	10,
 	"path":		"/massive/temp/",
 	"mode":		"both",
 	"list":	[{
@@ -13,7 +13,7 @@
 		"rid":	59901
 	}, {
 		"name":	"祈Inory",
-		"rid":	766
+		"rid":	544625
 	}, {
 		"name":	"野良犬P",
 		"rid":	23131609
@@ -22,7 +22,7 @@
 		"rid":	23698286
 	}, {
 		"name":	"醒爷",
-		"rid":	318
+		"rid":	56237
 	}, {
 		"name":	"雫るる",
 		"rid":	21013446
