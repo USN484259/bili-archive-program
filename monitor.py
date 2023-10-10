@@ -11,8 +11,8 @@ import live_rec
 logger = logging.getLogger("monitor")
 
 
-def exec_record(rid, credential, path, uname, title, mode):
-	util.run(live_rec.record(rid, credential, path, uname, title, mode))
+def exec_record(rid, credential, path, uname, title):
+	util.run(live_rec.record(rid, credential, path, uname, title))
 
 
 async def check(config, credential):
@@ -55,8 +55,6 @@ async def check(config, credential):
 
 		if not info.get("playurl"):
 			logger.warning("empty play URL")
-			logger.warning("HACK: URLv2-only live room not implemented, skip")
-			continue
 
 		uname = info.get("uname")
 		title = info.get("title")
@@ -69,8 +67,7 @@ async def check(config, credential):
 				credential,
 				config.get("path"),
 				uname,
-				title,
-				config.get("mode", "save"),
+				title
 			), daemon = False)
 		task.start()
 		record["task"] = task

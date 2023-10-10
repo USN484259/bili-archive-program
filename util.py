@@ -2,6 +2,7 @@ import sys
 import os
 import re
 import time
+import fcntl
 import asyncio
 import httpx
 import traceback
@@ -47,14 +48,14 @@ bandwidth_limit = None
 tmp_postfix = ".tmp"
 noaudio_stub = ".noaudio"
 
-async def stall():
+async def stall(second = None):
 	global stall_mutex
 	global stall_timestamp
 
 	async with stall_mutex:
 		timestamp = time.monotonic_ns()
 		time_diff = timestamp - stall_timestamp
-		time_wait = int(stall_duration * sec_to_ns) - time_diff
+		time_wait = int((second or stall_duration) * sec_to_ns) - time_diff
 		logger.debug("stall %dns",  max(time_wait, 0))
 		if time_diff > 0 and time_wait > 0:
 			await asyncio.sleep(time_wait / sec_to_ns)
@@ -191,6 +192,23 @@ async def credential(auth_file):
 		raise Exception("bad Credential")
 
 	return credential
+
+
+class locked_file:
+	def __init__(self, filename, mode = 'r', **kwargs):
+		self.f = open(filename, mode = mode, **kwargs)
+		if 'r' in mode:
+			self.lock_mode = fcntl.LOCK_SH
+		else:
+			self.lock_mode = fcntl.LOCK_EX
+
+	def __enter__(self):
+		fcntl.flock(self.f, self.lock_mode | fcntl.LOCK_NB)
+		return self.f
+
+	def __exit__(self, exc_type, exc_value, traceback):
+		fcntl.flock(self.f, fcntl.LOCK_UN)
+		self.f.close()
 
 
 class staged_file:

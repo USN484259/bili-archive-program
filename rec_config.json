@@ -1,7 +1,6 @@
 {
 	"interval":	10,
-	"path":		"/massive/temp/",
-	"mode":		"both",
+	"path":		"/tmp/",
 	"list":	[{
 		"name":	"Hiiro",
 		"rid":	21919321

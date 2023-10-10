@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
 import os
+import io
 import time
 import asyncio
 import re
 import json
+import zipfile
 import logging
 from collections import deque
 import bilibili_api
@@ -14,28 +16,16 @@ import util
 logger = logging.getLogger("live_rec")
 
 
-async def fetch_stream(url, sink_func, *args):
+async def fetch_stream(url, sink):
 	logger.debug("start fetching stream %s", url)
 	sess = bilibili_api.get_session()
-	sink_list = []
-	try:
-		async with sess.stream("GET", url, headers = util.agent, timeout = util.http_timeout) as resp:
-			logger.debug(resp)
-			resp.raise_for_status()
 
-			async for chunk in resp.aiter_bytes():
-				if len(sink_list) == 0:
-					logger.debug("creating sinks")
-					sink_list = sink_func(*args)
-					assert(sink_list)
-					logger.debug("sink count %d", len(sink_list))
+	async with sess.stream("GET", url, headers = util.agent, timeout = util.http_timeout) as resp:
+		logger.debug(resp)
+		resp.raise_for_status()
 
-				for sink in sink_list:
-					sink.write(chunk)
-	finally:
-		logger.info("closing %d sinks", len(sink_list))
-		for sink in sink_list:
-			sink.close()
+		async for chunk in resp.aiter_bytes():
+			sink.write(chunk)
 
 
 async def worker_danmaku(room, credential, path):
@@ -128,42 +118,9 @@ async def worker_danmaku(room, credential, path):
 			pass
 
 
-def on_create_sinks(mode, name_prefix):
-	logger.info("creating sinks, mode %s", mode)
-	sink_list = []
-	if mode == "remux" or mode == "both":
-		filename = name_prefix + ".mp4"
-		logger.debug("remux file " + filename)
-		try:
-			remuxer = GstRemuxer(filename)
-			remuxer.start()
-			sink_list.append(remuxer)
-		except:
-			logger.exception("exception in creating remuxer")
-			if mode == "remux":
-				logger.warning("remux failed, fallback to save mode")
-				mode = "save"
-
-	if mode != "remux":
-		filename = name_prefix + ".flv"
-		logger.debug("record file " + filename)
-		file_sink = open(filename, mode = "wb")
-		sink_list.append(file_sink)
-
-	return sink_list
-
-
-async def worker_record(room, path, mode, resolution = live.ScreenResolution.ORIGINAL):
-	global GstRemuxer
+async def worker_record(room, path):
 	try:
-		logger.debug("record live into %s, mode %s, resolution %s", path, mode, str(resolution))
-		if mode == "remux" or mode == "both":
-			try:
-				from gst_remuxer import GstRemuxer
-			except:
-				logger.exception("failed in loading remuxer")
-				logger.warning("no GStreamer, fallback to save mode")
-				mode = "save"
+		logger.debug("record live into %s", path)
 
 		first_time = True
 		while True:
@@ -179,13 +136,16 @@ async def worker_record(room, path, mode, resolution = live.ScreenResolution.ORI
 					if status != 1:
 						break
 
-				info = await room.get_room_play_url(resolution)
-				logger.log(util.LOG_TRACE, info)
-				url = info.get("durl")[0].get("url")
-
+				url_info = await get_url(room)
+				logger.debug(url_info)
 				name_prefix = os.path.join(path, str(start_time // util.sec_to_ns))
-				await fetch_stream(url, on_create_sinks, mode, name_prefix)
-				# await util.fetch(url, os.path.join(path, filename), mode = "stream")
+				if url_info.get("file") == "index.m3u8":
+					await record_hls(name_prefix + ".zip", url_info)
+				else:
+					file_url = url_info.get("host") + url_info.get("base") + url_info.get("extra")
+					await record_flv(name_prefix + ".flv", file_url)
+
+
 			except Exception as e:
 				logger.exception("exception on recording")
 				util.on_exception(e)
@@ -203,9 +163,88 @@ async def worker_record(room, path, mode, resolution = live.ScreenResolution.ORI
 		raise
 
 
-async def record(rid, credential, path, uname, title, mode = "save"):
+async def get_url(room):
+	info = await room.get_room_play_info_v2()
+
+	url_table = info.get("playurl_info").get("playurl").get("stream")[0].get("format")[0].get("codec")[0]
+
+	logger.debug(url_table)
+
+	qn_table = url_table.get("accept_qn")
+	best_qn = 0
+	for i in range(len(qn_table)):
+		if qn_table[i] > qn_table[best_qn]:
+			best_qn = i
+
+	logger.info("best qn %d, index %d", qn_table[best_qn], best_qn)
+
+	url_info = url_table.get("url_info")[best_qn]
+
+	url_match = re.fullmatch(r"(.+/)(.+)\?", url_table.get("base_url"))
+	url_path = url_match.group(1)
+	url_file = url_match.group(2)
+
+	return {
+			"host": url_info.get("host"),
+			"base": url_table.get("base_url"),
+			"path": url_path,
+			"file": url_file,
+			"extra": url_info.get("extra"),
+		}
+
+
+async def record_flv(flv_name, url):
+	with util.locked_file(flv_name, "xb") as f:
+		await fetch_stream(url, f)
+
+async def record_hls(zip_name, url_info):
+	with util.locked_file(zip_name, "x+b") as zip_file:
+		with zipfile.ZipFile(zip_file, mode = 'w') as archive:
+			end_list = False
+			while not end_list:
+				index_buffer = io.BytesIO()
+				index_url = url_info.get("host") + url_info.get("base") + url_info.get("extra")
+				await util.stall(2)
+				await fetch_stream(index_url, index_buffer)
+				index_buffer.seek(0)
+				index_file = io.TextIOWrapper(index_buffer)
+				while True:
+					line = index_file.readline()
+					logger.info(line)
+					if not line:
+						break
+					line = line.strip()
+					if line == "#EXT-X-ENDLIST":
+						logger.warn("end-list, exiting")
+						end_list = True
+						continue
+
+					name = None
+					match = re.fullmatch(r'#EXT-X-MAP:URI="(.+)"', line)
+					if match:
+						name = match.group(1)
+					elif not line.startswith("#"):
+						name = line
+
+					if not name:
+						logger.warn("skip line %s", line)
+						continue
+					try:
+						archive.getinfo(name)
+						logger.warn("skip existing file %s", name)
+						continue
+					except KeyError:
+						pass
+
+					url = url_info.get("host") +  url_info.get("path") + name + '?' + url_info.get("extra")
+					with archive.open(name, mode = 'w') as f:
+						logger.info("save file %s, url %s", name, url)
+						await fetch_stream(url, f)
+
+
+async def record(rid, credential, path, uname, title):
 	rec_path = os.path.join(path, uname + '_' + title + '_' + time.strftime("%y_%m_%d_%H_%M"))
-	logger.info("recording liveroom %d, title %s, path %s, mode %s", rid, title, path, mode)
+	logger.info("recording liveroom %d, title %s, path %s", rid, title, path)
 
 	room = live.LiveRoom(rid, credential)
 	play_info = await room.get_room_play_info()
@@ -220,7 +259,7 @@ async def record(rid, credential, path, uname, title, mode = "save"):
 	task_danmaku.add_done_callback(asyncio.Task.result)
 
 	try:
-		await worker_record(room, rec_path, mode)
+		await worker_record(room, rec_path)
 	finally:
 		task_danmaku.cancel()
 		try:
@@ -238,13 +277,12 @@ async def main(args):
 	usr = user.User(room_info.get("uid"))
 	user_info = await usr.get_user_info()
 
-	await record(args.room, credential, util.opt_path(args.dest), user_info.get("name"), room_info.get("title"), args.mode)
+	await record(args.room, credential, util.opt_path(args.dest), user_info.get("name"), room_info.get("title"))
 
 
 if __name__ == "__main__":
 	args = util.parse_args([
 		(("room",), {"type" : int}),
 		(("-u", "--auth"), {}),
-		(("-m", "--mode"), {"choices": ["save", "remux", "both"], "default": "save"}),
 	])
 	util.run(main(args))
