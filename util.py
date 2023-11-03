@@ -12,12 +12,9 @@ import logging
 import bilibili_api
 from bilibili_api import Credential
 
-LOG_TRACE = 2
-log_format = "%(asctime)s\t%(process)d\t%(levelname)s\t%(name)s\t%(message)s"
+logger = logging.getLogger("bili_arch.util")
 
-logging.addLevelName(LOG_TRACE, "TRACE")
-logging.basicConfig(level = 0, format = log_format)
-logger = logging.getLogger("util")
+log_format = "%(asctime)s\t%(process)d\t%(levelname)s\t%(name)s\t%(message)s"
 
 agent = {
 	"User-Agent": "Mozilla/5.0",
@@ -27,15 +24,16 @@ agent = {
 sec_to_ns = 1000 * 1000 * 1000
 
 unit_table = {
-	'b': 1,
-	'B': 1,
 	'k': 1000,
-	'K': 0x400,
+	'ki': 0x400,
 	'm': 1000 * 1000,
-	'M': 0x100000,
+	'mi': 0x100000,
 	'g': 1000 * 1000 * 1000,
-	'G': 0x40000000
+	'gi': 0x40000000,
 }
+
+tmp_postfix = ".tmp"
+noaudio_stub = ".noaudio"
 
 http_timeout = 30
 
@@ -44,9 +42,8 @@ stall_duration = 1
 stall_timestamp = 0
 
 bandwidth_limit = None
+root_dir = "."
 
-tmp_postfix = ".tmp"
-noaudio_stub = ".noaudio"
 
 async def stall(second = None):
 	global stall_mutex
@@ -64,17 +61,22 @@ async def stall(second = None):
 
 
 def mkdir(path):
-	try:
-		logger.debug("mkdir " + path)
-		os.mkdir(path)
-	except FileExistsError:
-		logger.debug("exist" + path)
-		pass
+	logger.debug("mkdir " + path)
+	os.makedirs(path, exist_ok = True)
+
+
+def subdir(key):
+	path = os.path.join(root_dir, key)
+	mkdir(path)
+	return path
+
+def report(key, status, *args):
+	print(key[0].upper(), status, *args, flush = True)
 
 
 def touch(path):
 	logger.debug("touch " + path)
-	open(path, "a").close()
+	open(path, "ab").close()
 
 
 def list_bv(path):
@@ -92,9 +94,11 @@ def parse_args(arg_list = []):
 	global stall_duration
 	global stall_timestamp
 	global bandwidth_limit
+	global root_dir
 
 	parser = argparse.ArgumentParser()
-	parser.add_argument("-d", "--dest")
+	# parser.add_argument("-d", "--dest")
+	parser.add_argument("-r", "--root")
 	parser.add_argument("-t", "--timeout", type = int)
 	parser.add_argument("-s", "--stall", type = float)
 	parser.add_argument("-v", "--verbose", action = "count", default = 0)
@@ -108,12 +112,13 @@ def parse_args(arg_list = []):
 	args = parser.parse_args()
 
 	log_level = logging.INFO + 10 * (args.quiet - args.verbose)
-	logging.getLogger().setLevel(log_level)
+	logging.basicConfig(level = log_level, format = log_format)
+	root_logger = logging.getLogger()
 
 	if args.log:
 		handler = logging.FileHandler(args.log, delay = True)
 		handler.setFormatter(logging.Formatter(log_format))
-		logging.getLogger().addHandler(handler)
+		root_logger.addHandler(handler)
 
 	if args.timeout:
 		http_timeout = int(args.timeout)
@@ -123,27 +128,14 @@ def parse_args(arg_list = []):
 	stall_timestamp = time.monotonic_ns()
 
 	if args.bandwidth:
-		match = re.fullmatch(r"(\d+)([bBkKmMgG]?)", args.bandwidth)
-		bandwidth_limit = int(match.group(1)) * unit_table.get(match.group(2), 'b')
+		match = re.fullmatch(r"(\d+)([kKmMgG][Ii]?)?", args.bandwidth)
+		bandwidth_limit = int(match.group(1)) * unit_table.get(match.group(2).lower(), 1)
+
+	if args.root:
+		root_dir = args.root
 
 	logger.debug(args)
-	logger.log(2, args)
 	return args
-
-
-def opt_path(path):
-	if not path:
-		return ""
-	elif path[-1:] != os.path.sep:
-		return path + os.path.sep
-	else:
-		return path
-
-
-def on_exception(e):
-	if isinstance(e, bilibili_api.exceptions.NetworkException) and e.status == 412:
-		logger.critical("encounter flow control, rethrow")
-		raise
 
 
 def run(func):
@@ -184,7 +176,6 @@ async def credential(auth_file):
 		for line in f:
 			match = parser.fullmatch(line)
 			if match:
-				logger.log(0, "got key " + match.group(1))
 				info[match.group(1)] = match.group(2)
 
 	credential = Credential(**info)
@@ -194,41 +185,85 @@ async def credential(auth_file):
 	return credential
 
 
-class locked_file:
-	def __init__(self, filename, mode = 'r', **kwargs):
-		self.f = open(filename, mode = mode, **kwargs)
-		if 'r' in mode:
-			self.lock_mode = fcntl.LOCK_SH
-		else:
-			self.lock_mode = fcntl.LOCK_EX
+def locked_file(filename, mode, **kwargs):
+	f = open(filename, mode = mode, **kwargs)
+	if 'r' in mode and '+' not in mode:
+		lock_mode = fcntl.LOCK_SH
+	else:
+		lock_mode = fcntl.LOCK_EX
+
+	try:
+		fcntl.flock(f, lock_mode | fcntl.LOCK_NB)
+		return f
+	except:
+		f.close()
+		raise
+
+
+class locked_path(os.PathLike):
+	def __init__(self, *path_list, shared = False):
+		self.path = os.path.join(*path_list)
+		mkdir(self.path)
+		self.fd = os.open(self.path, os.O_RDONLY | os.O_DIRECTORY)
+		lock_mode = (shared and fcntl.LOCK_SH or fcntl.LOCK_EX)
+		try:
+			fcntl.flock(self.fd, lock_mode | fcntl.LOCK_NB)
+		except:
+			os.close(self.fd)
+			raise
+
+	def __fspath__(self):
+		return self.path
 
 	def __enter__(self):
-		fcntl.flock(self.f, self.lock_mode | fcntl.LOCK_NB)
-		return self.f
+		return self
 
 	def __exit__(self, exc_type, exc_value, traceback):
-		fcntl.flock(self.f, fcntl.LOCK_UN)
-		self.f.close()
+		self.close()
+
+	def close(self):
+		if self.fd is not None:
+			os.close(self.fd)
+			self.fd = None
 
 
 class staged_file:
 	def __init__(self, filename, mode = 'r', **kwargs):
 		self.filename = filename
 		self.tmp_name = None
+		open_mode = mode
 		if tmp_postfix and ('w' in mode):
 			self.tmp_name = filename + tmp_postfix
 			logger.debug("using stage file " + self.tmp_name)
+			touch(self.tmp_name)
+			open_mode = "r+" + (('b' in mode) and 'b' or '')
 
-		self.f = open(self.tmp_name or self.filename, mode = mode, **kwargs)
+		self.f = locked_file(self.tmp_name or self.filename, mode = open_mode, **kwargs)
+		self.closed = False
+		if 'w' in mode:
+			try:
+				self.f.truncate(0)
+				self.f.seek(0)
+			except:
+				self.f.close()
+				raise
 
 	def __enter__(self):
 		return self.f
 
 	def __exit__(self, exc_type, exc_value, traceback):
-		self.f.close()
-		if exc_type is None and exc_value is None and self.tmp_name:
-			logger.debug("move " + self.tmp_name + " to " + self.filename)
-			os.replace(self.tmp_name, self.filename)
+		self.close(exc_type is None and exc_value is None)
+
+	def close(self, replace = True):
+		if self.closed:
+			return
+		try:
+			if replace and self.tmp_name:
+				logger.debug("move " + self.tmp_name + " to " + self.filename)
+				os.replace(self.tmp_name, self.filename)
+		finally:
+			self.f.close()
+			self.closed = True
 
 
 def save_json(obj, path):
@@ -239,32 +274,26 @@ def save_json(obj, path):
 
 async def fetch(url, path):
 	sess = bilibili_api.get_session()
-	logger.log(0, "fetching " + url + " into " + path)
+	logger.debug("fetching " + url + " into " + path)
 	async with sess.stream("GET", url, headers=agent, timeout = http_timeout) as resp:
-		logger.log(0, resp)
 		resp.raise_for_status()
 
-		file_name = path
 		file_length = None
 		length = resp.headers.get('content-length')
 		if length:
-			logger.log(0, "content length " + length)
+			logger.debug("content length " + length)
 			length = int(length)
 		else:
 			logger.warning("missing content-length")
 
-		if tmp_postfix:
-			file_name = path + tmp_postfix
-			logger.debug("using stage file " + file_name)
 
-		with open(file_name, "wb") as f:
+		with staged_file(path, "wb") as f:
 			last_timestamp = None
 			if bandwidth_limit:
 				logger.debug("bandwidth limit " + str(bandwidth_limit) + " byte/sec")
 				last_timestamp = time.monotonic_ns()
 
 			async for chunk in resp.aiter_bytes():
-				logger.log(0, '*', raw = True)
 				f.write(chunk)
 
 				if bandwidth_limit:
@@ -273,7 +302,6 @@ async def fetch(url, path):
 					expect_time = sec_to_ns * len(chunk) / bandwidth_limit
 					time_wait = int(expect_time - time_diff)
 					if time_diff > 0 and time_wait > 0:
-						logger.log(0, '<' + str(time_wait) + '>')
 						await asyncio.sleep(time_wait / sec_to_ns)
 						cur_timestamp = time.monotonic_ns()
 					last_timestamp = cur_timestamp
@@ -281,14 +309,10 @@ async def fetch(url, path):
 			file_length = f.tell()
 			logger.debug("EOF with file length " + str(file_length))
 
-	if length and file_length != length:
-		logger.warning("%s size mismatch, expect %d got %d",file_name, length, file_length)
-		if length > file_length:
-			raise Exception("unexpected EOF " + path)
-
-	if tmp_postfix:
-		logger.debug("move " + file_name + " to " + path)
-		os.replace(file_name, path)
+			if length and file_length != length:
+				logger.warning("%s size mismatch, expect %d got %d", path, length, file_length)
+				if length > file_length:
+					raise Exception("unexpected EOF " + path)
 
 	return file_length
 

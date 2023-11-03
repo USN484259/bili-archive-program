@@ -6,7 +6,7 @@ from collections import deque
 from bilibili_api import video, interactive_video
 import util
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("bili_arch.interactive")
 
 def is_interactive(info):
 	score = 0
@@ -94,7 +94,6 @@ async def to_interactive(v):
 
 	await util.stall()
 	root_edge = await v.get_edge_info()
-	logger.log(util.LOG_TRACE, root_edge)
 
 	choice_theme = root_edge.get("edges").get("skin", {})
 	vars_list = []
@@ -122,7 +121,6 @@ async def to_interactive(v):
 		cid, edge = edge_queue.popleft()
 		title = edge.get("title")
 		logger.debug("node %s, cid %d", title, cid)
-		logger.log(util.LOG_TRACE, edge)
 
 		if cid in node_map:
 			continue
@@ -155,7 +153,6 @@ async def to_interactive(v):
 		"vars":		vars_list,
 		"theme":	choice_theme
 	}
-	logger.log(util.LOG_TRACE, result)
 	return result
 
 
@@ -168,7 +165,6 @@ def save_graph(info, path):
 	with util.staged_file(path, "w") as f:
 		f.write("digraph {\n")
 		for edge in edge_list:
-			logger.log(util.LOG_TRACE, edge)
 			line = str(edge.get("src_cid")) + " -> " + str(edge.get("dst_cid"))
 			condition = edge.get("condition", None)
 			action = edge.get("action", None)
@@ -187,7 +183,6 @@ def save_graph(info, path):
 			f.write('\t' + line + ";\n")
 
 		for node in node_list:
-			logger.log(util.LOG_TRACE, node)
 			f.write('\t' + str(node.get("cid")) + "\t[label=\"" + node.get("title") + "\"];\n")
 
 		f.write("}\n")

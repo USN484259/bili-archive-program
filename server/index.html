@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8"/>
+</head>
+<body>
+	<h1 id="title"></h1>
+	<span id="summary"></span>
+	<span id="dir_action"></span>
+	<table id="dir_listing">
+		<thead>
+			<tr>
+				<th>name</th>
+				<th>size</th>
+				<th>mtime</th>
+				<th>action</th>
+			</tr>
+		</thead>
+		<tbody>
+		</tbody>
+	</table>
+
+	<script type="module">
+
+function size_string(size) {
+	const size_unit = [
+		" B",
+		" KiB",
+		" MiB",
+		" GiB",
+		" TiB",
+		" PiB"
+	];
+	let index = 0
+	let unit_base = 1
+	while (size >= unit_base * 0x400) {
+		if (index + 1 >= size_unit.length)
+			break
+		index += 1
+		unit_base *= 0x400
+	}
+	return (size / unit_base).toFixed(index > 0) + size_unit[index]
+}
+
+const re_path = new RegExp("^(.*/)[^/]+$")
+const re_top = new RegExp("^(.*/)[^/]+/$")
+
+let path = document.location.pathname.split(re_path)[1]
+let title_elem = document.getElementById("title")
+title_elem.append("Index of " + decodeURI(path))
+
+let resp = await fetch(path)
+let dir_list = await resp.json()
+console.log(dir_list)
+
+let table_elem = document.getElementById("dir_listing")
+let tbody_elem = table_elem.getElementsByTagName("tbody")[0]
+
+
+let top_path = path.split(re_top)[1]
+console.log(top_path)
+if (top_path) {
+	let url = top_path + "index.html"
+	let tr_elem = document.createElement("tr")
+	let td_elem = document.createElement("td")
+	let a_elem = document.createElement("a")
+	a_elem.setAttribute("href", url)
+	a_elem.append("../")
+	td_elem.append(a_elem)
+	tr_elem.append(td_elem)
+
+	for (let i = 0; i < 3; i++) {
+		tr_elem.append(document.createElement("td"))
+	}
+	tbody_elem.append(tr_elem)
+}
+
+dir_list.sort(function(a, b) {
+	return b.mtime - a.mtime
+})
+
+let summary_elem = document.getElementById("summary")
+summary_elem.append("total items: " + dir_list.length)
+
+for (let entry of dir_list) {
+	let tr_elem = document.createElement("tr")
+
+	// name
+	let name_elem = document.createElement("td")
+	let a_elem = document.createElement("a")
+	let name = entry.name
+	let url = path + name
+
+	if (entry.type == "dir") {
+		name += '/'
+		url += "/index.html"
+	}
+
+	a_elem.setAttribute("href", url)
+	a_elem.append(name)
+	name_elem.append(a_elem)
+
+	// size
+	let size_elem = document.createElement("td")
+	if (entry.type != "dir")
+		size_elem.append(size_string(entry.size))
+
+	// mtime
+	let mtime_elem = document.createElement("td")
+	mtime_elem.append(new Date(entry.mtime).toLocaleString())
+
+	// action
+	let action_elem = document.createElement("td")
+	if (name.endsWith(".zip")) {
+		let zip_elem = document.createElement("a")
+		let zip_url = name + "/index.html"
+		zip_elem.setAttribute("href", zip_url)
+		zip_elem.append("browse")
+		action_elem.append(zip_elem)
+	}
+	if (name.endsWith(".flv")) {
+		let player_elem = document.createElement("a")
+		let player_url = "/player.html?path=" + path + name
+		player_elem.setAttribute("href", player_url)
+		player_elem.append("play")
+		action_elem.append(player_elem)
+	}
+
+
+	tr_elem.append(name_elem, size_elem, mtime_elem, action_elem)
+	tbody_elem.append(tr_elem)
+}
+
+	</script>
+	<style>
+span {
+	padding: 10px;
+}
+table {
+	border-collapse: collapse;
+}
+thead {
+	border: 1px solid;
+}
+th, td {
+	padding: 10px;
+}
+
+thead th:nth-child(1) {
+	width: 50%;
+}
+thead th:nth-child(4) {
+	width: 20%;
+}
+
+tbody tr:nth-child(odd) {
+	background-color: #cccccc;
+}
+
+tbody tr:nth-child(even) {
+	background-color: #eeeeee;
+}
+	</style>
+</body>
+</html>

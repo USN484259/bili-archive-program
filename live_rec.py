@@ -13,28 +13,41 @@ import bilibili_api
 from bilibili_api import live, user
 import util
 
-logger = logging.getLogger("live_rec")
+logger = logging.getLogger("bili_arch.live_rec")
 
 
-async def fetch_stream(url, sink):
+async def fetch_stream(url, sink_func, *args):
 	logger.debug("start fetching stream %s", url)
 	sess = bilibili_api.get_session()
 
-	async with sess.stream("GET", url, headers = util.agent, timeout = util.http_timeout) as resp:
-		logger.debug(resp)
-		resp.raise_for_status()
+	if callable(sink_func):
+		sink = None
+	else:
+		sink = sink_func
 
-		async for chunk in resp.aiter_bytes():
-			sink.write(chunk)
+	try:
+		async with sess.stream("GET", url, headers = util.agent, timeout = util.http_timeout) as resp:
+			logger.debug(resp)
+			resp.raise_for_status()
+
+			async for chunk in resp.aiter_bytes():
+				if not sink:
+					logger.debug("calling sink_func")
+					sink = sink_func(*args)
+
+				sink.write(chunk)
+	finally:
+		if callable(sink_func) and sink:
+			logger.debug("closing sink")
+			sink.close()
 
 
 async def worker_danmaku(room, credential, path):
 	try:
-		path = util.opt_path(path)
 		rec_name = os.path.join(path, "danmaku.json")
 		logger.debug("record live danmaku into " + rec_name)
 		conn = live.LiveDanmaku(room.room_display_id, credential = credential)
-		with open(rec_name, "a") as f:
+		with util.locked_file(rec_name, "a") as f:
 			mutex = asyncio.Lock()
 			queue = deque()
 			cond = asyncio.Condition()
@@ -44,28 +57,25 @@ async def worker_danmaku(room, credential, path):
 						name = None
 						url = None
 						async with cond:
-							logger.log(util.LOG_TRACE, "wget standby")
+							logger.debug("wget standby")
 							await cond.wait()
 							name, url = queue.popleft()
 
-						logger.debug("fetch emot " + name)
+						logger.info("fetch emot " + name)
 						ext = os.path.splitext(url)[1]
 						if not ext or ext == "":
 							ext = ".png"
-						emot_file = path + name + ext
-						logger.log(util.LOG_TRACE, "%s\t%s", emot_file, url)
+						emot_file = os.path.join(path, name + ext)
 						if os.path.isfile(emot_file):
 							logger.debug("skip existing emot")
 						else:
 							await util.fetch(url, emot_file)
 				except Exception as e:
 					logger.exception("exception in worker_wget")
-					util.on_exception(e)
 					raise
 
 
 			async def on_event(info):
-				logger.log(util.LOG_TRACE, info)
 				cmd = info.get("type")
 				data = info.get("data")
 				if not data:
@@ -86,7 +96,7 @@ async def worker_danmaku(room, credential, path):
 					emot_name = meta.get("emoticon_unique")
 					emot_url = meta.get("url")
 					if emot_name and emot_url:
-						logger.log(util.LOG_TRACE, "scheduled emot fetch " + emot_name)
+						logger.debug("scheduled emot fetch " + emot_name)
 						async with cond:
 							queue.append((emot_name, emot_url))
 							cond.notify()
@@ -101,11 +111,9 @@ async def worker_danmaku(room, credential, path):
 						await conn.connect()
 					except Exception as e:
 						logger.exception("exception on recording danmaku")
-						util.on_exception(e)
 
 	except Exception as e:
 		logger.exception("exception in worker_danmaku")
-		util.on_exception(e)
 		raise
 
 	finally:
@@ -130,7 +138,6 @@ async def worker_record(room, path):
 					first_time = False
 				else:
 					play_info = await room.get_room_play_info()
-					logger.log(util.LOG_TRACE, play_info)
 					status = play_info.get("live_status")
 					logger.info("room %d, status %d", play_info.get("room_id"), status)
 					if status != 1:
@@ -148,7 +155,6 @@ async def worker_record(room, path):
 
 			except Exception as e:
 				logger.exception("exception on recording")
-				util.on_exception(e)
 
 			stop_time = time.time_ns()
 			diff_time = stop_time - start_time
@@ -159,7 +165,6 @@ async def worker_record(room, path):
 
 	except Exception as e:
 		logger.exception("exception in worker_record")
-		util.on_exception(e)
 		raise
 
 
@@ -194,8 +199,7 @@ async def get_url(room):
 
 
 async def record_flv(flv_name, url):
-	with util.locked_file(flv_name, "xb") as f:
-		await fetch_stream(url, f)
+	await fetch_stream(url, util.locked_file, flv_name, "xb")
 
 async def record_hls(zip_name, url_info):
 	with util.locked_file(zip_name, "x+b") as zip_file:
@@ -215,7 +219,7 @@ async def record_hls(zip_name, url_info):
 						break
 					line = line.strip()
 					if line == "#EXT-X-ENDLIST":
-						logger.warn("end-list, exiting")
+						logger.info("end-list, exiting")
 						end_list = True
 						continue
 
@@ -227,24 +231,24 @@ async def record_hls(zip_name, url_info):
 						name = line
 
 					if not name:
-						logger.warn("skip line %s", line)
 						continue
 					try:
 						archive.getinfo(name)
-						logger.warn("skip existing file %s", name)
+						logger.debug("skip existing file %s", name)
 						continue
 					except KeyError:
 						pass
 
 					url = url_info.get("host") +  url_info.get("path") + name + '?' + url_info.get("extra")
-					with archive.open(name, mode = 'w') as f:
-						logger.info("save file %s, url %s", name, url)
-						await fetch_stream(url, f)
+
+					file_info = zipfile.ZipInfo(name, time.gmtime())
+					logger.debug("save file %s, url %s", name, url)
+					await fetch_stream(url, archive.open, file_info, "w")
 
 
-async def record(rid, credential, path, uname, title):
-	rec_path = os.path.join(path, uname + '_' + title + '_' + time.strftime("%y_%m_%d_%H_%M"))
-	logger.info("recording liveroom %d, title %s, path %s", rid, title, path)
+async def record(rid, credential, live_root, uname, title):
+	rec_name = uname + '_' + title + '_' + time.strftime("%y_%m_%d_%H_%M")
+	logger.info("recording liveroom %d, title %s, path %s", rid, title, live_root)
 
 	room = live.LiveRoom(rid, credential)
 	play_info = await room.get_room_play_info()
@@ -254,18 +258,23 @@ async def record(rid, credential, path, uname, title):
 		logger.warning("not streaming, exit")
 		return
 
-	util.mkdir(rec_path)
-	task_danmaku = asyncio.create_task(worker_danmaku(room, credential, rec_path))
-	task_danmaku.add_done_callback(asyncio.Task.result)
+	with util.locked_path(live_root, rec_name) as rec_path:
+		task_danmaku = None
+		if credential:
+			task_danmaku = asyncio.create_task(worker_danmaku(room, credential, rec_path))
+			task_danmaku.add_done_callback(asyncio.Task.result)
+		else:
+			logger.warning("missing credential, skip recording danmaku")
 
-	try:
-		await worker_record(room, rec_path)
-	finally:
-		task_danmaku.cancel()
 		try:
-			await task_danmaku
-		except asyncio.CancelledError:
-			pass
+			await worker_record(room, rec_path)
+		finally:
+			if task_danmaku is not None:
+				task_danmaku.cancel()
+				try:
+					await task_danmaku
+				except asyncio.CancelledError:
+					pass
 
 
 async def main(args):
@@ -276,13 +285,15 @@ async def main(args):
 	room_info = (await room.get_room_info()).get("room_info")
 	usr = user.User(room_info.get("uid"))
 	user_info = await usr.get_user_info()
+	live_root = args.dir or util.subdir("live")
 
-	await record(args.room, credential, util.opt_path(args.dest), user_info.get("name"), room_info.get("title"))
+	await record(args.room, credential, live_root, user_info.get("name"), room_info.get("title"))
 
 
 if __name__ == "__main__":
 	args = util.parse_args([
 		(("room",), {"type" : int}),
+		(("-d", "--dir"), {}),
 		(("-u", "--auth"), {}),
 	])
 	util.run(main(args))

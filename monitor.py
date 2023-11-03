@@ -8,11 +8,11 @@ from bilibili_api import live
 import util
 import live_rec
 
-logger = logging.getLogger("monitor")
+logger = logging.getLogger("bili_arch.monitor")
 
 
-def exec_record(rid, credential, path, uname, title):
-	util.run(live_rec.record(rid, credential, path, uname, title))
+def exec_record(rid, credential, live_root, uname, title):
+	util.run(live_rec.record(rid, credential, live_root, uname, title))
 
 
 async def check(config, credential):
@@ -59,13 +59,14 @@ async def check(config, credential):
 		uname = info.get("uname")
 		title = info.get("title")
 		logger.info("start recording %s\troom %d, user %s, title %s", name, rid, uname, title)
+		live_root = util.subdir("live")
 
 		await util.stall()
 		task = multiprocessing.Process(
 			target = exec_record, args = (
 				rid,
 				credential,
-				config.get("path"),
+				live_root,
 				uname,
 				title
 			), daemon = False)
@@ -84,11 +85,6 @@ async def main(args):
 	if args.config:
 		with open(args.config, "r") as f:
 			config = json.load(f)
-
-	if args.dest:
-		config["path"] = args.dest
-
-	config["path"] = util.opt_path(config.get("path"))
 
 	while True:
 		try:

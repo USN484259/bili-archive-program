@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+</head>
+<body>
+	<script src="/flv.min.js"></script>
+	<video id="video" controls></video>
+	<script>
+let params = new URLSearchParams(document.location.search);
+let path = params.get("path");
+console.log(path);
+if (path) {
+	if (flvjs.isSupported()) {
+		let videoElement = document.getElementById('video');
+		let flvPlayer = flvjs.createPlayer({
+			type: "flv",
+			url: path
+		});
+		flvPlayer.attachMediaElement(videoElement);
+		flvPlayer.load();
+		flvPlayer.play();
+	}
+}
+	</script>
+</body>
+</html>
