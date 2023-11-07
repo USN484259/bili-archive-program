@@ -15,6 +15,7 @@ from interactive import is_interactive, to_interactive, save_graph
 logger = logging.getLogger("bili_arch.bv_down")
 
 dot_bin = shutil.which("dot")
+bv_pattern = re.compile(r"BV[0-9A-Za-z]+")
 part_pattern = re.compile(r"([VSD]):(\d+)")
 
 # mode		operation
@@ -313,7 +314,7 @@ async def do_update(bv, path, credential, force):
 		logger.debug("video parts %d", len(part_list))
 
 		for part in part_list:
-			cid = part.get("cid")
+			cid = int(part.get("cid"))
 			logger.info("downloading %d, %s", cid, part.get("part", None) or part.get("title", ""))
 			with util.locked_path(bv_root, str(cid)) as part_root:
 				result = await fetch_part(v, cid, part_root, force)
@@ -358,6 +359,7 @@ async def download(bv_list, video_root, credential = None, mode = None):
 	for bv in bv_list:
 		fetch_status = False
 		try:
+			assert(bv_pattern.fullmatch(bv))
 			await fetch_bv(bv, video_root, mode, credential)
 			fetched_video += 1
 			fetch_status = True

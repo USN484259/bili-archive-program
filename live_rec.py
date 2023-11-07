@@ -246,8 +246,17 @@ async def record_hls(zip_name, url_info):
 					await fetch_stream(url, archive.open, file_info, "w")
 
 
+name_escape_table = str.maketrans({
+	'/':	'-',
+	'\\':	'-',
+	'.':	'_'
+})
 async def record(rid, credential, live_root, uname, title):
-	rec_name = uname + '_' + title + '_' + time.strftime("%y_%m_%d_%H_%M")
+	rec_name = uname + '_' + title
+	# escape special chars in rec_name
+	rec_name = rec_name.translate(name_escape_table)
+
+	rec_name += time.strftime("_%y_%m_%d_%H_%M")
 	logger.info("recording liveroom %d, title %s, path %s", rid, title, live_root)
 
 	room = live.LiveRoom(rid, credential)
