@@ -380,8 +380,8 @@ async def main(args):
 		logger.debug("%d BV on cmdline", len(args.inputs))
 		bv_list = args.inputs
 	else:
-		logger.debug("scan BV in " + (args.dest or "(cwd)"))
-		bv_list = util.list_bv(args.dest)
+		logger.debug("scan BV in " + (args.dir or "(cwd)"))
+		bv_list = util.list_bv(args.dir)
 
 	logger.info("BV count %d, mode %s", len(bv_list), args.mode)
 	logger.debug(bv_list)

@@ -115,10 +115,16 @@ async function main() {
 			zip_elem.setAttribute("href", zip_url)
 			zip_elem.append("browse")
 			action_elem.append(zip_elem)
+
+			let player_elem = document.createElement("a")
+			let player_url = "/player.html?type=hls&path=" + url + '/'
+			player_elem.setAttribute("href", player_url)
+			player_elem.append("play")
+			action_elem.append(player_elem)
 		}
 		if (name.endsWith(".flv")) {
 			let player_elem = document.createElement("a")
-			let player_url = "/player.html?path=" + url
+			let player_url = "/player.html?type=flv&path=" + url
 			player_elem.setAttribute("href", player_url)
 			player_elem.append("play")
 			action_elem.append(player_elem)
@@ -137,6 +143,9 @@ addEventListener("DOMContentLoaded", main)
 
 	</script>
 	<style>
+a {
+	padding: 4px;
+}
 span {
 	padding: 10px;
 }

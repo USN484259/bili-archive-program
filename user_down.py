@@ -20,6 +20,11 @@ async def fetch_season(usr, season_id, exclude_list = {}):
 
 	logger.info("season %d, %s, count %d", season_id, season_name, season_count)
 
+	if not season_list:
+		logger.warning("skip empty season")
+		season_info["archives"] = []
+		return season_info
+
 	if season_name in exclude_list:
 		logger.warning("excluded " + season_name)
 		return
@@ -51,6 +56,11 @@ async def fetch_series(usr, series_meta, exclude_list = {}):
 	series_name = series_meta.get("name")
 
 	logger.info("series %d, %s, count %d", series_id, series_name, series_count)
+
+	if not series_list:
+		logger.warning("skip empty series")
+		series_info["archives"] = []
+		return series_info
 
 	if series_name in exclude_list:
 		logger.warning("excluded " + series_name)

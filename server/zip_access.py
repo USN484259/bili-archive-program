@@ -7,8 +7,55 @@ import json
 import zipfile
 import mimetypes
 from urllib.parse import parse_qs
+from socketserver import ThreadingMixIn
 from fcgi_server import FcgiServer
 from fastcgi import FcgiHandler
+
+from threading import RLock
+from collections import OrderedDict
+
+class lru_cache:
+	def __init__(self, func, limit = 16):
+		self.cache = OrderedDict()
+		self.limit = limit
+		self.atime = time.monotonic()
+		self.lock = RLock()
+		self.new_func = func["new"]
+		self.del_func = func["del"]
+
+	def shink(self):
+		with self.lock:
+			while len(self.cache) > self.limit:
+				k, v = self.cache.popitem(0)
+				self.del_func(k, v)
+
+	def flush(self):
+		with self.lock:
+			if len(self.cache) > 0:
+				l = self.limit
+				self.limit = 0
+				self.shink()
+				self.limit = l
+
+	def set_limit(self, limit):
+		with self.lock:
+			self.limit = limit
+			self.shink()
+
+	def get_access_time(self):
+		return self.atime
+
+	def __call__(self, arg0, *args, **kwargs):
+		with self.lock:
+			self.atime = time.monotonic()
+			if arg0 in self.cache:
+				self.cache.move_to_end(arg0)
+				return self.cache[arg0]
+			else:
+				obj = self.new_func(arg0, *args, **kwargs)
+				self.cache[arg0] = obj
+				self.shink()
+				return obj
 
 
 def copy_stream(dst_stream, src_stream, length, chunk_size = 0x1000):
@@ -124,6 +171,7 @@ class zip_access_handler(FcgiHandler):
 
 
 	def handle(self):
+		global zip_cache
 		try:
 			req_method = self.environ.get("REQUEST_METHOD")
 			if req_method not in ("GET", "HEAD"):
@@ -137,11 +185,11 @@ class zip_access_handler(FcgiHandler):
 			if not zip_member:
 				zip_member = "/"
 
-			with zipfile.ZipFile(os.path.join(www_root, zip_path), mode = 'r') as archive:
-				if zip_member.endswith('/'):
-					self.handle_dir(archive, zip_member.rstrip('/'))
-				else:
-					self.handle_file(archive, zip_member)
+			archive = zip_cache(os.path.join(www_root, zip_path), mode = 'r')
+			if zip_member.endswith('/'):
+				self.handle_dir(archive, zip_member.rstrip('/'))
+			else:
+				self.handle_file(archive, zip_member)
 
 
 		except Exception as e:
@@ -149,6 +197,23 @@ class zip_access_handler(FcgiHandler):
 			return
 
 
-with FcgiServer(zip_access_handler) as server:
+def zip_close_func(path, obj):
+	obj.close()
+
+zip_cache = lru_cache({
+	"new":	zipfile.ZipFile,
+	"del":	zip_close_func
+})
+
+
+class FcgiThreadingServer(ThreadingMixIn, FcgiServer):
+	def service_actions(self):
+		super().service_actions()
+		global zip_cache
+		cur_time = time.monotonic()
+		if cur_time - zip_cache.get_access_time() > 30:
+			zip_cache.flush()
+
+with FcgiThreadingServer(zip_access_handler) as server:
 	server.serve_forever()
 

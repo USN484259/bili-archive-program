@@ -5,13 +5,12 @@
 </head>
 <body>
 	<script src="/flv.min.js"></script>
+	<script src="/hls.min.js"></script>
 	<video id="video" controls></video>
 	<script>
 
-const re_path = new RegExp("[?&]path=([^&]+)")
-let path = document.location.search.match(re_path)[1]
-console.log(path);
-if (path) {
+
+function play_flv(path) {
 	if (flvjs.isSupported()) {
 		let videoElement = document.getElementById('video');
 		let flvPlayer = flvjs.createPlayer({
@@ -22,6 +21,66 @@ if (path) {
 		flvPlayer.load();
 		flvPlayer.play();
 	}
+
+}
+
+function build_manifest(data) {
+	file_list = JSON.parse(data);
+
+	media_list_header = "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:1\n";
+	media_list = "";
+	file_list.forEach((file) => {
+		if (file.name[0] == 'h') {
+			media_list_header += `#EXT-X-MAP:URI=\"${file.name}\"\n`
+		} else {
+			media_list += `#EXTINF:1,\n${file.name}\n`
+		}
+	});
+
+	return media_list_header + media_list + "#EXT-X-ENDLIST\n";
+}
+
+class CustomLoader extends Hls.DefaultConfig.loader {
+	constructor(config) {
+		super(config);
+		var load = this.load.bind(this);
+		this.load = function (context, config, callbacks) {
+			if (context.type == 'manifest') {
+				var onSuccess = callbacks.onSuccess;
+				callbacks.onSuccess = function (response, stats, context) {
+					response.data = build_manifest(response.data);
+					onSuccess(response, stats, context);
+				};
+			}
+			load(context, config, callbacks);
+		};
+	}
+}
+
+function play_hls(path) {
+	if (Hls.isSupported()) {
+		let videoElement = document.getElementById('video');
+		let hls = new Hls({
+			pLoader: CustomLoader
+		});
+		hls.on(Hls.Events.ERROR, function (ev, data) {
+			console.log(data);
+		});
+		hls.loadSource(path);
+		hls.attachMedia(videoElement);
+	}
+}
+
+const re_type = new RegExp("[?&]type=([^&]+)")
+const re_path = new RegExp("[?&]path=([^&]+)")
+let type = document.location.search.match(re_type)[1]
+let path = document.location.search.match(re_path)[1]
+console.log(type, path);
+if (path) {
+	if (type == "flv")
+		play_flv(path);
+	else if (type == "hls")
+		play_hls(path);
 }
 	</script>
 </body>

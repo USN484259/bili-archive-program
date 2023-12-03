@@ -77,7 +77,7 @@ parse JSON from `dir_listing` and show HTML page
 ### server/player.html
 
 FLV/HLS video playback
-+ HLS work in process
++ HLS stream in ZIP file
 
 Dependencies:
 + [flv.js](https://github.com/Bilibili/flv.js), for FLV playback

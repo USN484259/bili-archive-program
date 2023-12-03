@@ -154,9 +154,9 @@ async def wait_online():
 		try:
 			count += 1
 			logger.info("waiting online %d", count)
-			await stall()
+			await stall(5)
 			resp = await sess.head("https://www.bilibili.com")
-			resp.raise_for_status()
+			# resp.raise_for_status()
 
 			logger.info("already online")
 			return
