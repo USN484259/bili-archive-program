@@ -13,7 +13,8 @@ logger = logging.getLogger("bili_arch.monitor")
 multiprocessing = multiprocessing.get_context("fork")
 
 def exec_record(rid, credential, live_root, uname, title):
-	util.run(live_rec.record(rid, credential, live_root, uname, title))
+	room = live.LiveRoom(rid, credential)
+	util.run(live_rec.record(room, credential, live_root, uname, title))
 
 
 async def check(live_root, config, credential):

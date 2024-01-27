@@ -251,15 +251,14 @@ name_escape_table = str.maketrans({
 	'\\':	'-',
 	'.':	'_'
 })
-async def record(rid, credential, live_root, uname, title):
+async def record(room, credential, live_root, uname, title):
 	rec_name = uname + '_' + title
 	# escape special chars in rec_name
 	rec_name = rec_name.translate(name_escape_table)
 
 	rec_name += time.strftime("_%y_%m_%d_%H_%M")
-	logger.info("recording liveroom %d, title %s, path %s", rid, title, live_root)
+	logger.info("recording liveroom %d, title %s, path %s", room.room_display_id, title, live_root)
 
-	room = live.LiveRoom(rid, credential)
 	play_info = await room.get_room_play_info()
 	status = play_info.get("live_status")
 	logger.info("room %d, status %d", play_info.get("room_id"), status)
@@ -286,23 +285,46 @@ async def record(rid, credential, live_root, uname, title):
 					pass
 
 
+async def start_recording(room, live_root, credential):
+	room_info = (await room.get_room_info()).get("room_info")
+	usr = user.User(room_info.get("uid"))
+	user_info = await usr.get_user_info()
+
+	await record(room, credential, live_root, user_info.get("name"), room_info.get("title"))
+
 async def main(args):
 	credential = None
 	if args.auth:
 		credential = await util.credential(args.auth)
 	room = live.LiveRoom(args.room, credential)
-	room_info = (await room.get_room_info()).get("room_info")
-	usr = user.User(room_info.get("uid"))
-	user_info = await usr.get_user_info()
+
 	live_root = args.dir or util.subdir("live")
 
-	await record(args.room, credential, live_root, user_info.get("name"), room_info.get("title"))
+	if args.monitor:
+		interval = args.interval
+		while True:
+			try:
+				await util.stall()
+				play_info = await room.get_room_play_info()
+				status = play_info.get("live_status")
+				logger.info("room %d, status %d", play_info.get("room_id"), status)
+				if status == 1:
+					await start_recording(room, live_root, credential)
 
+			except Exception:
+				logger.exception("exception on checking")
+			logger.info("checking done, sleep %d sec", interval)
+			await asyncio.sleep(interval)
+
+	else:
+		await start_recording(room, live_root, credential)
 
 if __name__ == "__main__":
 	args = util.parse_args([
 		(("room",), {"type" : int}),
 		(("-d", "--dir"), {}),
 		(("-u", "--auth"), {}),
+		(("-i", "--interval"), {"type" : int, "default" : 30}),
+		(("--monitor",),{"action" : "store_true"})
 	])
 	util.run(main(args))
