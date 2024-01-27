@@ -10,26 +10,27 @@ import live_rec
 
 logger = logging.getLogger("bili_arch.monitor")
 
+multiprocessing = multiprocessing.get_context("fork")
 
 def exec_record(rid, credential, live_root, uname, title):
 	util.run(live_rec.record(rid, credential, live_root, uname, title))
 
 
-async def check(config, credential):
+async def check(live_root, config, credential):
 	await util.stall()
 	info_list = await live.get_live_followers_info(need_recommend = False, credential = credential)
 	rid_table = {}
 	for info in info_list.get("rooms", []):
-		# name = info.get("uname")
+		name = info.get("uname")
 		# uid = info.get("uid")
 		rid = info.get("roomid")
 		if rid:
-			logger.debug("active room %d", rid)
+			logger.debug("active room %d, %s", rid, name)
 			rid_table[rid] = info
 
 	logger.info("active live rooms: %d", len(rid_table))
 
-	for record in config.get("list", []):
+	for record in config:
 		name = record.get("name", "")
 		rid = record.get("rid")
 		if not rid:
@@ -59,7 +60,6 @@ async def check(config, credential):
 		uname = info.get("uname")
 		title = info.get("title")
 		logger.info("start recording %s\troom %d, user %s, title %s", name, rid, uname, title)
-		live_root = util.subdir("live")
 
 		await util.stall()
 		task = multiprocessing.Process(
@@ -80,28 +80,29 @@ async def main(args):
 	if args.auth:
 		credential = await util.credential(args.auth)
 
-	config = {}
+	with open(args.config, "r") as f:
+		config = json.load(f)
 
-	if args.config:
-		with open(args.config, "r") as f:
-			config = json.load(f)
+	live_root = args.dir or util.subdir("live")
+	logger.info("monitoring %d rooms, record into %s" % (len(config), live_root))
 
 	while True:
 		try:
 			logger.info("checking live")
-			await check(config, credential)
+			await check(live_root, config, credential)
 		except Exception:
 			logger.exception("exception on checking")
 
-		interval = config.get("interval", 60)
-		logger.info("checking done, sleep %d sec", interval)
-		await asyncio.sleep(interval)
+		logger.info("checking done, sleep %d sec", args.interval)
+		await asyncio.sleep(args.interval)
 
 
 if __name__ == "__main__":
 	args = util.parse_args([
 		(("-u", "--auth"), {"required": True}),
 		(("-c", "--config"), {"required": True}),
+		(("-d", "--dir"), {}),
+		(("-i", "--interval"), {"type" : int, "default" : 30}),
 	])
 	util.run(main(args))
 

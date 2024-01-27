@@ -2,7 +2,7 @@
 
 import sys
 import socket
-from socketserver import BaseServer
+from socketserver import BaseServer, ThreadingMixIn
 
 
 class FcgiServer(BaseServer):
@@ -31,6 +31,8 @@ class FcgiServer(BaseServer):
 		request.close()
 
 
+class FcgiThreadingServer(ThreadingMixIn, FcgiServer):
+	pass
 
 
 if __name__ == "__main__":

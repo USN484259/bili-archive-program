@@ -3,7 +3,7 @@
 import os
 import json
 from urllib.parse import parse_qs
-from fcgi_server import FcgiServer
+from fcgi_server import FcgiThreadingServer
 from fastcgi import FcgiHandler
 
 
@@ -44,6 +44,7 @@ class dir_listing_handler(FcgiHandler):
 		except:
 			self["stdout"].write(b"Content-type: text/plain\r\nStatus: 404 Not Found\r\n\r\n404 Not Found\r\n")
 
+
 if __name__ == "__main__":
-	with FcgiServer(dir_listing_handler) as server:
+	with FcgiThreadingServer(dir_listing_handler) as server:
 		server.serve_forever()

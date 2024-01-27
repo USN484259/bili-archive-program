@@ -7,8 +7,7 @@ import json
 import zipfile
 import mimetypes
 from urllib.parse import parse_qs
-from socketserver import ThreadingMixIn
-from fcgi_server import FcgiServer
+from fcgi_server import FcgiThreadingServer
 from fastcgi import FcgiHandler
 
 from threading import RLock
@@ -206,7 +205,7 @@ zip_cache = lru_cache({
 })
 
 
-class FcgiThreadingServer(ThreadingMixIn, FcgiServer):
+class ZipAccessServer(FcgiThreadingServer):
 	def service_actions(self):
 		super().service_actions()
 		global zip_cache
@@ -214,6 +213,6 @@ class FcgiThreadingServer(ThreadingMixIn, FcgiServer):
 		if cur_time - zip_cache.get_access_time() > 30:
 			zip_cache.flush()
 
-with FcgiThreadingServer(zip_access_handler) as server:
+with ZipAccessServer(zip_access_handler) as server:
 	server.serve_forever()
 
