@@ -178,11 +178,17 @@ async def credential(auth_file):
 			if match:
 				info[match.group(1)] = match.group(2)
 
-	credential = Credential(**info)
-	if not await credential.check_valid():
-		raise Exception("bad Credential")
-
-	return credential
+	for i in range(5):
+		try:
+			await stall()
+			credential = Credential(**info)
+			if not await credential.check_valid():
+				raise Exception("bad Credential")
+			return credential
+		except (asyncio.TimeoutError, TimeoutError):
+			logger.warning("check credential timeout, retry %d" % (i + 1))
+	else:
+		raise TimeoutError
 
 
 def locked_file(filename, mode, **kwargs):

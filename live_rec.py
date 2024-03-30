@@ -112,6 +112,8 @@ async def worker_danmaku(room, credential, path):
 					except Exception as e:
 						logger.exception("exception on recording danmaku")
 
+					await util.stall(2)
+
 	except Exception as e:
 		logger.exception("exception in worker_danmaku")
 		raise
