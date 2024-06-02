@@ -38,7 +38,7 @@ noaudio_stub = ".noaudio"
 http_timeout = 30
 
 stall_mutex = asyncio.Lock()
-stall_duration = 1
+stall_duration = 2
 stall_timestamp = 0
 
 bandwidth_limit = None
@@ -48,11 +48,13 @@ root_dir = "."
 async def stall(second = None):
 	global stall_mutex
 	global stall_timestamp
+	if not second:
+		second = stall_duration
 
 	async with stall_mutex:
 		timestamp = time.monotonic_ns()
 		time_diff = timestamp - stall_timestamp
-		time_wait = int((second or stall_duration) * sec_to_ns) - time_diff
+		time_wait = int(second * sec_to_ns) - time_diff
 		logger.debug("stall %dns",  max(time_wait, 0))
 		if time_diff > 0 and time_wait > 0:
 			await asyncio.sleep(time_wait / sec_to_ns)
@@ -78,6 +80,9 @@ def touch(path):
 	logger.debug("touch " + path)
 	open(path, "ab").close()
 
+
+def timestamp_str():
+	return time.strftime("%y_%m_%d_%H_%M")
 
 def list_bv(path):
 	bv_pattern = re.compile(r"BV\w+")
@@ -116,7 +121,7 @@ def parse_args(arg_list = []):
 	root_logger = logging.getLogger()
 
 	if args.log:
-		handler = logging.FileHandler(args.log, delay = True)
+		handler = logging.FileHandler(args.log)
 		handler.setFormatter(logging.Formatter(log_format))
 		root_logger.addHandler(handler)
 

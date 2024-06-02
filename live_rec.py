@@ -133,8 +133,17 @@ async def worker_record(room, path):
 		logger.debug("record live into %s", path)
 
 		first_time = True
+		last_active_time = None
 		while True:
 			start_time = time.time_ns()
+			stop_time = None
+
+			if first_time:
+				last_active_time = start_time
+			elif start_time - last_active_time > 30 * util.sec_to_ns:
+				logger.error("cannot get room status after %d seconds, force stop", (start_time - last_active_time) // util.sec_to_ns)
+				raise TimeoutError()
+
 			try:
 				if first_time:
 					first_time = False
@@ -147,18 +156,25 @@ async def worker_record(room, path):
 
 				url_info = await get_url(room)
 				logger.debug(url_info)
-				name_prefix = os.path.join(path, str(start_time // util.sec_to_ns))
-				if url_info.get("file") == "index.m3u8":
-					await record_hls(name_prefix + ".zip", url_info)
-				else:
-					file_url = url_info.get("host") + url_info.get("base") + url_info.get("extra")
-					await record_flv(name_prefix + ".flv", file_url)
 
+				last_active_time = start_time
+
+				try:
+					name_prefix = os.path.join(path, str(start_time // util.sec_to_ns))
+					if url_info.get("file") == "index.m3u8":
+						await record_hls(name_prefix + ".zip", url_info)
+					else:
+						file_url = url_info.get("host") + url_info.get("base") + url_info.get("extra")
+						await record_flv(name_prefix + ".flv", file_url)
+
+				finally:
+					stop_time = time.time_ns()
+					last_active_time = stop_time
 
 			except Exception as e:
 				logger.exception("exception on recording")
 
-			stop_time = time.time_ns()
+			stop_time = stop_time or time.time_ns()
 			diff_time = stop_time - start_time
 			sleep_time = util.sec_to_ns - diff_time
 			if diff_time >= 0 and sleep_time > 0:
@@ -210,7 +226,7 @@ async def record_hls(zip_name, url_info):
 			while not end_list:
 				index_buffer = io.BytesIO()
 				index_url = url_info.get("host") + url_info.get("base") + url_info.get("extra")
-				await util.stall(2)
+				await util.stall(4)
 				await fetch_stream(index_url, index_buffer)
 				index_buffer.seek(0)
 				index_file = io.TextIOWrapper(index_buffer)
@@ -254,11 +270,10 @@ name_escape_table = str.maketrans({
 	'.':	'_'
 })
 async def record(room, credential, live_root, uname, title):
-	rec_name = uname + '_' + title
+	rec_name = uname + '_' + title + '_'
 	# escape special chars in rec_name
 	rec_name = rec_name.translate(name_escape_table)
-
-	rec_name += time.strftime("_%y_%m_%d_%H_%M")
+	rec_name += util.timestamp_str()
 	logger.info("recording liveroom %d, title %s, path %s", room.room_display_id, title, live_root)
 
 	play_info = await room.get_room_play_info()

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import os
 import json
 import asyncio
 import logging
@@ -14,6 +15,16 @@ multiprocessing = multiprocessing.get_context("fork")
 
 def exec_record(rid, credential, live_root, uname, title):
 	room = live.LiveRoom(rid, credential)
+	try:
+		log_filename = "live_" + str(rid) + '_' + util.timestamp_str() + ".log"
+		log_path = os.path.join(util.subdir("logs"), log_filename)
+		handler = logging.FileHandler(log_path)
+		handler.setFormatter(logging.Formatter(util.log_format))
+		logging.getLogger().addHandler(handler)
+	except Exception as e:
+		logger.exception()
+		pass
+
 	util.run(live_rec.record(room, credential, live_root, uname, title))
 
 
