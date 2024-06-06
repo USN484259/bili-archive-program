@@ -1,120 +1,146 @@
 #!/usr/bin/env python3
 
 import os
-import json
+import core
 import asyncio
+import httpx
+import json
 import logging
 import multiprocessing
-from bilibili_api import live
-import util
 import live_rec
 
-logger = logging.getLogger("bili_arch.monitor")
+# constants
 
+MONITOR_QUERY_URL = "https://api.live.bilibili.com/room/v1/Room/get_status_info_by_uids"
+
+# static objects
+
+logger = logging.getLogger("bili_arch.monitor")
 multiprocessing = multiprocessing.get_context("fork")
 
-def exec_record(rid, credential, live_root, uname, title):
-	room = live.LiveRoom(rid, credential)
-	try:
-		log_filename = "live_" + str(rid) + '_' + util.timestamp_str() + ".log"
-		log_path = os.path.join(util.subdir("logs"), log_filename)
-		handler = logging.FileHandler(log_path)
-		handler.setFormatter(logging.Formatter(util.log_format))
-		logging.getLogger().addHandler(handler)
-	except Exception as e:
-		logger.exception()
-		pass
+# helper functions
 
-	util.run(live_rec.record(room, credential, live_root, uname, title))
+async def get_live_info(sess, uid_list):
+	info_map = await core.request(sess, "POST", MONITOR_QUERY_URL, json = {"uids": uid_list})
+	return info_map
 
 
-async def check(live_root, config, credential):
-	await util.stall()
-	info_list = await live.get_live_followers_info(need_recommend = False, credential = credential)
-	rid_table = {}
-	for info in info_list.get("rooms", []):
-		name = info.get("uname")
-		# uid = info.get("uid")
-		rid = info.get("roomid")
-		if rid:
-			logger.debug("active room %d, %s", rid, name)
-			rid_table[rid] = info
+async def record_main(rid, path, credential):
+	async with core.session(credential) as sess:
+		with core.locked_path(path) as rec_path:
+			await live_rec.record(sess, rid, rec_path)
 
-	logger.info("active live rooms: %d", len(rid_table))
 
-	for record in config:
-		name = record.get("name", "")
-		rid = record.get("rid")
-		if not rid:
-			logger.warning("%s\tmissing rid, skip", name)
+def exec_record(*args):
+	asyncio.run(record_main(*args))
+	os._exit(0)
+
+
+async def task_cleanup(record):
+	task = record.get("task")
+	if task is not None:
+		if task.is_alive():
+			name = record.get("name") or record.get("uid", "")
+			logger.debug("%s recording, skip", name)
+			return False
+		task.close()
+		record["task"] = None
+	return True
+
+
+async def task_start(record, rid, path, credential):
+	assert(record.get("task") is None)
+	task = multiprocessing.Process(
+		target = exec_record, args = (
+			rid, path, credential
+		), daemon = False)
+	task.start()
+	record["task"] = task
+
+
+# methods
+
+def load_config(args):
+	config = {
+		"live_root": args.dir or core.subdir("live"),
+		"credential": args.credential,
+	}
+	with open(args.config, "r") as f:
+		user_list = json.load(f)
+
+	records = {}
+	for elem in user_list:
+		uid = elem["uid"]
+		elem["task"] = None
+		records[uid] = elem
+
+	config["records"] = records
+	return config
+
+
+async def monitor_check(sess, config):
+	records = config.get("records")
+	uid_list = list(records.keys())
+	logger.info("checking %d live rooms", len(uid_list))
+
+	info_map = await get_live_info(sess, uid_list)
+	active_rooms = []
+	for uid, record in records.items():
+		name = record.get("name", str(uid))
+
+		if not await task_cleanup(record):
+			active_rooms.append(name)
 			continue
 
-		task = record.get("task")
-		if task is not None:
-			if task.is_alive():
-				logger.debug("%s\troom %d: task running, skip", name, rid)
-				continue
-			task.close()
-			record["task"] = None
-
-		if not record.get("enable", True):
-			logger.debug("%s\troom %d: disabled", name, rid)
-			continue
-
-		info = rid_table.get(rid)
+		info = info_map.get(str(uid))
 		if not info:
-			logger.debug("%s\troom %d: inactive", name, rid)
+			logger.warning("no stat for %s(%d)", name, uid)
 			continue
 
-		if not info.get("playurl"):
-			logger.warning("empty play URL")
+		rid = info.get("room_id", 0)
+		if record.get("rid", rid) != rid:
+			logger.warning("%s(%d) rid mismatch: %d/%d", name, uid, rid, record.get("rid", 0))
 
-		uname = info.get("uname")
-		title = info.get("title")
-		logger.info("start recording %s\troom %d, user %s, title %s", name, rid, uname, title)
+		status = info.get("live_status", -1)
 
-		await util.stall()
-		task = multiprocessing.Process(
-			target = exec_record, args = (
-				rid,
-				credential,
-				live_root,
-				uname,
-				title
-			), daemon = False)
-		task.start()
-		record["task"] = task
+		logger.debug("%s, room %d, status %d", name, rid, status)
 
+		if status != 1:
+			continue
+
+		uname = info.get("uname", str(uid))
+		title = info.get("title", "")
+		rec_name = live_rec.make_record_name(uname, title)
+		rec_path = os.path.join(config.get("live_root"), rec_name)
+		logger.info("start recording %s, room %d, %s", name, rid, rec_name)
+
+		await task_start(record, rid, rec_path, config.get("credential"))
+		active_rooms.append(name)
+
+	logger.info("active live rooms %d %s", len(active_rooms), " ".join(active_rooms))
+
+
+# entrance
 
 async def main(args):
-	await util.wait_online()
-	credential = None
-	if args.auth:
-		credential = await util.credential(args.auth)
+	config = load_config(args)
+	async with core.session(args.credential) as sess:
+		while True:
+			try:
+				await monitor_check(sess, config)
 
-	with open(args.config, "r") as f:
-		config = json.load(f)
+			except Exception as e:
+				logger.exception("exception on monitor_check")
 
-	live_root = args.dir or util.subdir("live")
-	logger.info("monitoring %d rooms, record into %s" % (len(config), live_root))
-
-	while True:
-		try:
-			logger.info("checking live")
-			await check(live_root, config, credential)
-		except Exception:
-			logger.exception("exception on checking")
-
-		logger.info("checking done, sleep %d sec", args.interval)
-		await asyncio.sleep(args.interval)
+			logger.info("sleep %d sec", args.interval)
+			await asyncio.sleep(args.interval)
 
 
 if __name__ == "__main__":
-	args = util.parse_args([
-		(("-u", "--auth"), {"required": True}),
+	args = core.parse_args([
 		(("-c", "--config"), {"required": True}),
 		(("-d", "--dir"), {}),
 		(("-i", "--interval"), {"type" : int, "default" : 30}),
 	])
-	util.run(main(args))
+	asyncio.run(main(args))
 
