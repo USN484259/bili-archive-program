@@ -11,6 +11,7 @@ import traceback
 import argparse
 import json
 import logging
+import collections
 
 # constants
 
@@ -33,16 +34,24 @@ USER_AGENT = {
 BILI_DOMAIN = ".bilibili.com"
 CHECK_CREDENTIAL_URL = "https://api.bilibili.com/x/web-interface/nav"
 
+default_name_map = {
+	"danmaku": "danmaku.xml",
+	"tmp_ext": ".tmp",
+	"noaudio": ".noaudio",
+	"hls_index": "index.m3u8",
+}
 
 # static objects
 
 http_timeout = 20
-default_stall_time = 2
+default_stall_time = 5
 bandwidth_limit = None
 root_dir = "."
 
 logger = logging.getLogger("bili_arch.core")
 
+default_names = collections.namedtuple("DefaultName", default_name_map.keys())(**default_name_map)
+bv_pattern = re.compile(r"(BV\w+)")
 
 # helper functions
 
@@ -135,7 +144,25 @@ class Stall:
 			self.last_time = cur_time
 
 
+def list_bv(path):
+	bv_list = []
+	for f in os.listdir(path):
+		if bv_pattern.fullmatch(f):
+			bv_list.append(f)
+
+	return bv_list
+
+
+def report(key, status, *args):
+	print(key[0].upper(), status, *args, flush = True)
+
+
 ## file management
+
+def touch(path):
+	logger.debug("touch " + path)
+	open(path, "ab").close()
+
 
 def mkdir(path):
 	logger.debug("mkdir " + path)
@@ -163,6 +190,45 @@ def locked_file(filename, mode, **kwargs):
 		raise
 
 
+class staged_file:
+	def __init__(self, filename, mode = 'r', **kwargs):
+		self.filename = filename
+		self.tmp_name = None
+		open_mode = mode
+		if 'w' in mode:
+			self.tmp_name = filename + default_names.tmp_ext
+			logger.debug("using stage file " + self.tmp_name)
+			touch(self.tmp_name)
+			open_mode = "r+" + (('b' in mode) and 'b' or '')
+
+		self.f = locked_file(self.tmp_name or self.filename, mode = open_mode, **kwargs)
+		self.closed = False
+		if 'w' in mode:
+			try:
+				self.f.truncate(0)
+				self.f.seek(0)
+			except:
+				self.f.close()
+				raise
+
+	def __enter__(self):
+		return self.f
+
+	def __exit__(self, exc_type, exc_value, traceback):
+		self.close(exc_type is None and exc_value is None)
+
+	def close(self, replace = True):
+		if self.closed:
+			return
+		try:
+			if replace and self.tmp_name:
+				logger.debug("move " + self.tmp_name + " to " + self.filename)
+				os.replace(self.tmp_name, self.filename)
+		finally:
+			self.f.close()
+			self.closed = True
+
+
 class locked_path(os.PathLike):
 	def __init__(self, *path_list, shared = False):
 		self.path = os.path.join(*path_list)
@@ -176,6 +242,9 @@ class locked_path(os.PathLike):
 			raise
 
 	def __fspath__(self):
+		return self.path
+
+	def __str__(self):
 		return self.path
 
 	def __enter__(self):
@@ -197,10 +266,21 @@ def session(cookies):
 	return httpx.AsyncClient(headers = USER_AGENT, timeout = timeout, cookies = cookies, follow_redirects = True)
 
 
+async def check_credential(sess):
+	response = await sess.request("GET", CHECK_CREDENTIAL_URL)
+	logger.debug(response)
+	result = response.json()
+	logger.debug(result)
+	code = result.get("code")
+	if code != 0:
+		raise Exception("bad credential %d" % code)
+
+
 async def request(sess, method, url, **kwargs):
 	# TODO wbi sign
 	response = await sess.request(method, url, **kwargs)
-	result = response.raise_for_status().json()
+	response.raise_for_status()
+	result = response.json()
 
 	code = result.get("code", -32768)
 	if code == 0:
@@ -211,12 +291,47 @@ async def request(sess, method, url, **kwargs):
 	raise Exception(msg)
 
 
-async def check_credential(sess):
-	response = await sess.request("GET", CHECK_CREDENTIAL_URL)
-	logger.debug(response)
-	result = response.json()
-	logger.debug(result)
-	code = result.get("code")
-	if code != 0:
-		raise Exception("bad credential %d" % code)
+async def fetch(sess, url, path):
+	logger.debug("fetching " + url + " into " + path)
+	async with sess.stream("GET", url) as resp:
+		logger.debug(resp)
+		resp.raise_for_status()
+
+		file_length = None
+		length = resp.headers.get('content-length')
+		if length:
+			logger.debug("content length " + length)
+			length = int(length)
+		else:
+			logger.warning("missing content-length")
+
+
+		with staged_file(path, "wb") as f:
+			last_timestamp = None
+			if bandwidth_limit:
+				logger.debug("bandwidth limit " + str(bandwidth_limit) + " byte/sec")
+				last_timestamp = time.monotonic()
+
+			async for chunk in resp.aiter_bytes():
+				f.write(chunk)
+
+				if bandwidth_limit:
+					cur_timestamp = time.monotonic()
+					time_diff = cur_timestamp - last_timestamp
+					expect_time = len(chunk) / bandwidth_limit
+					time_wait = int(expect_time - time_diff)
+					if time_diff > 0 and time_wait > 0:
+						await asyncio.sleep(time_wait)
+						cur_timestamp = time.monotonic()
+					last_timestamp = cur_timestamp
+
+			file_length = f.tell()
+			logger.debug("EOF with file length " + str(file_length))
+
+			if length and file_length != length:
+				logger.warning("%s size mismatch, expect %d got %d", path, length, file_length)
+				if length > file_length:
+					raise Exception("unexpected EOF " + path)
+
+	return file_length
 

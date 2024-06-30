@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 
 import os
-import json
 import time
-import httpx
 import asyncio
 import zipfile
 import logging
@@ -18,7 +16,6 @@ LIVE_STAT_RETRY_COUNT = 5
 
 DEFAULT_PREFER = "ts flv avc"
 DEFAULT_REJECT = "hevc"
-HLS_INDEX_NAME = "index.m3u8"
 
 LIVE_QUERY_URL = "https://api.live.bilibili.com/room/v1/Room/get_info"
 LIVE_USER_URL = "https://api.live.bilibili.com/live_user/v1/Master/info"
@@ -109,7 +106,9 @@ def find_best_url(info, *, prefer = "", reject = ""):
 				result["protocol_name"] = stream.get("protocol_name")
 				result["format_name"] = fmt.get("format_name")
 				result_score = prefer.find(result.get("format_name")) + prefer.find(result.get("codec_name"))
-	logger.debug("best: protocol %s, format %s, codec %s, qn %d", result.get("protocol_name"), result.get("format_name"), result.get("codec_name"), result.get("current_qn"))
+
+	if result:
+		logger.debug("best: protocol %s, format %s, codec %s, qn %d", result.get("protocol_name"), result.get("format_name"), result.get("codec_name"), result.get("current_qn"))
 	return result
 
 
@@ -183,7 +182,7 @@ async def record_hls(sess, info, name_prefix):
 
 			finally:
 				file_time = time.gmtime()
-				file_info = zipfile.ZipInfo(HLS_INDEX_NAME, file_time)
+				file_info = zipfile.ZipInfo(core.default_names.hls_index, file_time)
 				with archive.open(file_info, "w") as f:
 					m3u.dump(f)
 
@@ -224,7 +223,7 @@ async def record(sess, rid, path, *, prefer = None, reject = None):
 				if not url_info:
 					norej_info = find_best_url(info, prefer = prefer)
 					if norej_info:
-						logger.warning("bad reject: ", reject)
+						logger.warning("bad reject: %s", reject)
 						url_info = norej_info
 
 				if "hls" in url_info.get("protocol_name"):

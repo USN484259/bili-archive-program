@@ -7,13 +7,13 @@ import json
 import logging
 import shutil
 import subprocess
-import util
-from interactive import is_interactive
-
 try:
 	from defusedxml.sax import make_parser as xml_make_parser
 except ModuleNotFoundError:
 	from xml.sax import make_parser as xml_make_parser
+
+import core
+
 
 logger = logging.getLogger("bili_arch.verify")
 
@@ -81,13 +81,12 @@ def verify_media(path, part_duration, duration_tolerance):
 		return 0, 0
 
 
-def verify_bv(bv_root, scan_files = False, duration_tolerance = None):
+def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = None):
 	if scan_files and not ffprobe_bin:
 		raise Exception("ffprobe binary not found")
 
 	result = {
 		"info" : False,
-		"cover" : False
 	}
 	try:
 		logger.debug("verify video %s, scan %s, tolerance %f", bv_root, scan_files, duration_tolerance or math.nan)
@@ -98,32 +97,34 @@ def verify_bv(bv_root, scan_files = False, duration_tolerance = None):
 
 		logger.info("%s, %s", bv_info.get("bvid"), bv_info.get("title"))
 
-		for ext in [".jpg", ".png", ".gif", ".bmp"]:
-			cover_file = os.path.join(bv_root, "cover" + ext)
-			logger.debug("checking cover " + cover_file)
-			if not os.path.isfile(cover_file):
-				continue
-			if scan_files:
-				media_info = ffprobe(cover_file)
-				try:
-					codec = media_info.get("streams")[0].get("codec_name")
-					logger.debug("cover codec " + codec)
-					if codec not in ["mjpeg", "png", "gif", "bmp"]:
-						continue
-				except Exception as e:
-					logger.exception("exception on verify cover for " + cover_file)
+		if 'C' not in ignore:
+			result["cover"] = False
+			for ext in [".jpg", ".png", ".gif", ".bmp"]:
+				cover_file = os.path.join(bv_root, "cover" + ext)
+				logger.debug("checking cover " + cover_file)
+				if not os.path.isfile(cover_file):
 					continue
+				if scan_files:
+					media_info = ffprobe(cover_file)
+					try:
+						codec = media_info.get("streams")[0].get("codec_name")
+						logger.debug("cover codec " + codec)
+						if codec not in ["mjpeg", "png", "gif", "bmp"]:
+							continue
+					except Exception as e:
+						logger.exception("exception on verify cover for " + cover_file)
+						continue
 
-			logger.debug("found cover, format " + ext)
-			result["cover"] = True
-			break
-		else:
-			logger.warning("cover not found")
+				logger.debug("found cover, format " + ext)
+				result["cover"] = True
+				break
+			else:
+				logger.warning("cover not found")
 
 		part_list = None
 		if "interactive" in bv_info:
-			if not is_interactive(bv_info):
-				raise Exception("conflicting interactive video status")
+		# 	if not is_interactive(bv_info):
+		# 		raise Exception("conflicting interactive video status")
 
 			part_list = bv_info.get("interactive").get("nodes")
 
@@ -135,9 +136,11 @@ def verify_bv(bv_root, scan_files = False, duration_tolerance = None):
 			if bv_info.get("videos") != len(part_list):
 				raise Exception("part count mismatch")
 
-		subtitle_table = bv_info.get("subtitle")
-		if not subtitle_table:
-			logger.warning("missing subtitles for %s", bv_info.get("bvid"))
+		subtitle_table = None
+		if 'S' not in ignore:
+			subtitle_table = bv_info.get("subtitle")
+			if not subtitle_table:
+				logger.warning("missing subtitles for %s", bv_info.get("bvid"))
 
 		for part in part_list:
 			cid = part.get("cid")
@@ -172,22 +175,22 @@ def verify_bv(bv_root, scan_files = False, duration_tolerance = None):
 				logger.debug("file " + filename)
 				ext = os.path.splitext(filename)[1].lower()
 
-				if ext == util.tmp_postfix:
+				if ext == core.default_names.tmp_ext:
 					logger.debug("skip tmp file")
 					continue
 
-				if filename == util.noaudio_stub:
+				if filename == core.default_names.noaudio:
 					logger.info("found no-audio stub")
 					no_audio = True
 					continue
 
-				if filename == "danmaku.xml":
+				if filename == core.default_names.danmaku and 'D' not in ignore:
 					logger.debug("type: danmaku")
 					if scan_files:
 						try:
 							with open(os.path.join(part_root, filename), "r") as f:
 								xml_parser.parse(f)
-						except:
+						except Exception:
 							logger.warning("unexpected XML format")
 							continue
 
@@ -201,25 +204,29 @@ def verify_bv(bv_root, scan_files = False, duration_tolerance = None):
 						logger.warning("type: json (unknown)")
 						continue
 
-					lan = match.group(1)
-					logger.debug("type: subtitle " + lan)
-					if scan_files:
-						try:
-							with open(os.path.join(part_root, filename), "r") as f:
-								json.load(f)
-						except:
-							logger.warning("unexpected JSON format")
-							continue
+					if 'S' not in ignore:
+						lan = match.group(1)
+						logger.debug("type: subtitle " + lan)
+						if scan_files:
+							try:
+								with open(os.path.join(part_root, filename), "r") as f:
+									json.load(f)
+							except Exception:
+								logger.warning("unexpected JSON format")
+								continue
 
-					logger.debug("found subtitle, lang " + lan)
-					for i, sub in enumerate(subtitle):
-						if sub.get("lan") == lan:
-							del subtitle[i]
-							subtitle_count += 1
-							break
-					else:
-						logger.warning("subtitle not recorded " + lan)
+						logger.debug("found subtitle, lang " + lan)
+						for i, sub in enumerate(subtitle):
+							if sub.get("lan") == lan:
+								del subtitle[i]
+								subtitle_count += 1
+								break
+						else:
+							logger.warning("subtitle not recorded " + lan)
 
+					continue
+
+				if 'V' in ignore:
 					continue
 
 				if ext == ".m4v":

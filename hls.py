@@ -2,7 +2,6 @@
 
 import io
 import re
-import json
 import logging
 
 # constants

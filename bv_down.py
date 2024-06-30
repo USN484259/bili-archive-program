@@ -2,175 +2,145 @@
 
 import os
 import re
+import time
 import json
+import asyncio
 import logging
-import shutil
-import subprocess
-from bilibili_api import video
-from bilibili_api.exceptions.CredentialNoSessdataException import CredentialNoSessdataException
-import util
-from verify import verify_bv
-from interactive import is_interactive, to_interactive, save_graph
+import collections
 
-logger = logging.getLogger("bili_arch.bv_down")
+import core
+import verify
 
-dot_bin = shutil.which("dot")
-bv_pattern = re.compile(r"BV[0-9A-Za-z]+")
+# constants
+
+DEFAULT_PREFER = "avc"
+DEFAULT_REJECT = "hevc unknown"
+
+BV_INFO_URL = "https://api.bilibili.com/x/web-interface/view"
+DANMAKU_URL = "https://comment.bilibili.com/%d.xml"
+PLAY_INFO_URL = "https://api.bilibili.com/x/player/playurl"
+
+# static objects
+
+codec_name_map = collections.defaultdict(lambda: "unknown", [
+	(0, "default"),
+	(7, "avc"),
+	(12, "hevc"),
+	(13, "av1"),
+])
+
+logger = logging.getLogger("bili_arch.live_rec")
 part_pattern = re.compile(r"([VSD]):(\d+)")
 
-# mode		operation
-# ---------------------------------------------------
-# fix		re-download corrupted components
-# update	re-download info, cover, better quality
-# force		re-download everything
+# helper functions
 
-def find_best(res_list):
-	result = {
-		"id": 0
+async def get_bv_info(sess, bvid):
+	info = await core.request(sess, "GET", BV_INFO_URL, params = {"bvid": bvid})
+	return info
+
+
+async def get_play_info(sess, bvid, cid):
+	# TODO switch to wbi interface
+	params = {
+		"bvid": bvid,
+		"cid": cid,
+		"qn": 112,
+		"fnval": 16,
 	}
-	for k, v in enumerate(res_list):
-		codec_id = v.get("codecid")
-		if v.get("id") < result.get("id"):
-			continue
-
-		# skip HEVC, aka H.265
-		# TODO better handling for HEVC
-		elif v.get("id") == result.get("id") and codec_id != 12 and codec_id <= result.get("codecid"):
-			continue
-		result = v
-	return result
+	info = await core.request(sess, "GET", PLAY_INFO_URL, params = params)
+	return info
 
 
-async def fetch_media(url_info, path, key_name):
-	url_list = [
-		url_info.get(key_name)
-	] + url_info.get("backup_url")
+# stub
+def verify_bv(bv_root):
+	return verify.verify_bv(bv_root, ignore = "S")
 
-	for i, url in enumerate(url_list):
-		try:
-			await util.fetch(url, path)
-			return True
-		except Exception as e:
-			logger.exception("failed to fetch media")
-			logger.warning("URL failed %d/%d", i + 1, len(url_list))
 
-	logger.error("no valid URL (0/%d)" + len(url_list))
+def is_interactive(info):
+	# TODO
 	return False
 
 
-async def fetch_part(v, cid, path, force):
-	logger.debug("fetch part for %d, path %s, force %x", cid, path, force)
-	await util.stall()
-	url = await v.get_download_url(cid = cid)
-
-	result = True
-	if "dash" in url:
-		dash = url.get("dash")
-
-		best_video = find_best(dash.get("video"))
-		logger.debug("video quality %d, codec %s", best_video.get("id"), best_video.get("codecs"))
-		video_file = os.path.join(path, str(best_video.get("id")) + ".m4v")
-
-		if force or not os.path.isfile(video_file):
-			logger.debug("fetch video")
-			result = await fetch_media(best_video, video_file, "base_url")
-		else:
-			logger.debug("skip video")
-
-		if dash.get("audio", None):
-			best_audio = find_best(dash.get("audio"))
-			logger.debug("audio quality %d, codec %s", best_audio.get("id"), best_audio.get("codecs"))
-			audio_file = os.path.join(path, str(best_audio.get("id")) + ".m4a")
-
-			if force or not os.path.isfile(audio_file):
-				logger.debug("fetch audio")
-				result = await fetch_media(best_audio, audio_file, "base_url") and result
-			else:
-				logger.debug("skip audio")
-		else:
-			logger.warning("no audio")
-			util.touch(os.path.join(path, util.noaudio_stub))
+def save_interactive(iv_info, path):
+	raise NotImplementedError("interactive video not implemented")
 
 
-	elif "durl" in url:
-		logger.warning("unusual video without 'dash' instance, try 'durl'")
-		video_file = os.path.join(path, "video.flv")
-		if force or not os.path.isfile(video_file):
-			result = await fetch_media(url.get("durl")[0], video_file, "url")
+def save_info(info, bv_root):
+	# TODO rotate history
+	file_path = os.path.join(bv_root, "info.json")
+	with core.staged_file(file_path, "w") as f:
+		json.dump(info, f, indent = '\t', ensure_ascii = False)
 
-	else:
-		logger.error("unknown URL format")
-		result = False
 
+def find_best(info, prefer = "", reject = ""):
+	result = None
+	for v in info:
+		codec_name = codec_name_map[v.get("codecid")]
+		if codec_name in reject:
+			continue
+		if result and result.get("id") >= v.get("id"):
+			if result.get("id") > v.get("id"):
+				continue
+
+			result_codec_name = codec_name_map[result.get("codecid")]
+			if prefer.find(codec_name) <= result.get("codec_name"):
+				continue
+
+		result = v.copy()
+		result["codec_name"] = codec_name
+
+	if result:
+		logger.debug("best: id %d, codec %s(%d)", result.get("id"), result.get("codec_name"), result.get("codecid"))
 	return result
 
 
-async def fetch_cover(info, path, force):
-	logger.debug("fetch video cover for %s, path %s, force %x" , info.get("bvid"), path, force)
-	try:
-		url = info.get("pic")
-		ext = os.path.splitext(url)[1]
-		if not ext or ext == "":
-			ext = ".jpg"
+def find_best_url_dash(info, *, prefer, reject):
+	result = {}
+	def fill_url(name, ext, dummy_name = None):
+		url_info = find_best(info.get(name, []), prefer, reject)
+		if not url_info:
+			norej_info = find_best(info.get(name, []), prefer)
+			if norej_info:
+				logger.warning("bad reject: ", reject)
+				url_info = norej_info
 
-		cover_file = os.path.join(path, "cover" + ext)
-		if force or not os.path.isfile(cover_file):
-			await util.fetch(url, cover_file)
+		if url_info:
+			file_name = str(url_info.get("id")) + ext
+			url_list = [ url_info.get("base_url") ] + url_info.get("backup_url")
+			if url_list:
+				result[file_name] = url_list
+				return
+
+		if dummy_name:
+			logger.warning("no %s", name)
+			result[dummy_name] = []
 		else:
-			logger.debug("skip cover")
+			raise Exception("no url info for %s", name)
 
-		return True
-
-	except Exception as e:
-		logger.exception("error on fetch cover")
-		return False
+	fill_url("video", ".m4v")
+	fill_url("audio", ".m4a", core.default_names.noaudio)
+	return result
 
 
-async def fetch_danmaku(cid, path, force):
-	logger.debug("fetch danmaku for %d, path %s, force %x", cid, path, force)
-	try:
-		xml_file = os.path.join(path, "danmaku.xml")
-		if force or not os.path.isfile(xml_file):
-			await util.fetch("https://comment.bilibili.com/" + str(cid) + ".xml", xml_file)
-		else:
-			logger.debug("skip danmaku")
-
-		return True
-
-	except Exception as e:
-		logger.exception("error on fetch danmaku")
-		return False
+def find_best_url_durl(info, *, prefer, reject):
+	return {
+		"video.flv": [ info[0]["url"] ] + info[0]["backup_url"]
+	}
 
 
-async def fetch_subtitle(info, cid, path, force):
-	logger.debug("fetch subtitle for %d, path %s, force %x", cid, path, force)
-	try:
-		subtitle = info.get("subtitle").get(str(cid))
-		for sub in subtitle.get("subtitles"):
-			lan = sub.get("lan")
-			logger.debug("subtitle lang " + lan)
-			subtitle_file = os.path.join(path, "subtitle." + lan + ".json")
-			if force or not os.path.isfile(subtitle_file):
-				await util.fetch("https:" + sub.get("subtitle_url"), subtitle_file)
-			else:
-				logger.debug("skip subtitle " + lan)
-
-		return True
-
-	except Exception as e:
-		logger.exception("error on fetch subtitle")
-		return False
+async def fetch_interactive_info(sess, info, stall = None):
+	raise NotImplementedError("interactive video not implemented")
 
 
-async def fetch_info(v):
-	logger.debug("fetch video info " + v.get_bvid())
-	await util.stall()
-	info = await v.get_info()
+async def fetch_info(sess, bv, stall = None):
+	logger.debug("fetch video info %s", bv)
+	stall and await stall()
+	info = await get_bv_info(sess, bv)
 	part_list = None
 
 	if is_interactive(info):
 		logger.info("detected interactive video")
-		iv_info = await to_interactive(v)
+		iv_info = await fetch_interactive_info(sess, info, stall)
 		info["interactive"] = iv_info
 		part_list = iv_info.get("nodes")
 	else:
@@ -185,68 +155,104 @@ async def fetch_info(v):
 			else:
 				raise Exception(msg)
 
-	subtitle_map = {}
-	for part in part_list:
-		cid = part.get("cid")
-		try:
-			await util.stall()
-			subtitle = await v.get_subtitle(cid)
-			logger.debug("subtitle for %d, count %d", cid, len(subtitle.get("subtitles")))
-			subtitle_map[str(cid)] = subtitle
-		except CredentialNoSessdataException:
-			# HACK
-			logger.warning("missing credential, skip subtitles")
-			break
-
-	info["subtitle"] = subtitle_map
-
+	# skip subtitle for now
 	return info
 
 
-async def save_interactive(iv_info, bv_root, fmt = "svg"):
-	dot_file = os.path.join(bv_root, "graph.dot")
-	save_graph(iv_info, dot_file)
-	if dot_bin:
-		logger.debug("running dot on %s, image format %s", dot_file, fmt)
-		image_file = os.path.join(bv_root, "graph." + fmt)
-		cmdline = [dot_bin, "-T" + fmt, dot_file, "-o", image_file]
-		subprocess.run(cmdline)
+async def fetch_part(sess, bvid, cid, path, force, /, stall = None, *, prefer = None, reject = None):
+	logger.debug("fetch part for %d, path %s, force %x", cid, path, force)
+	stall and await stall()
+	play_info = await get_play_info(sess, bvid, cid)
+
+	if prefer is None:
+		prefer = DEFAULT_PREFER
+	if reject is None:
+		reject = DEFAULT_REJECT
+	logger.debug("prefer %s, reject %s", prefer, reject)
+
+	if "dash" in play_info:
+		logger.debug("dash format")
+		url_info = find_best_url_dash(play_info.get("dash"), prefer = prefer, reject = reject)
+	elif "durl" in play_info:
+		logger.debug("durl format")
+		url_info = find_best_url_durl(play_info.get("durl"), prefer = prefer, reject = reject)
 	else:
-		logger.warning("dot binary not found, skip")
+		raise Exception("unknown URL format")
 
-	theme_url = iv_info.get("theme").get("choice_image", None)
-	if theme_url:
-		logger.debug("fetch theme image")
-		ext = os.path.splitext(theme_url)[1]
-		if not ext or ext == "":
-			ext = ".jpg"
+	exception = None
+	for name, url_list in url_info.items():
+		file_path = os.path.join(path, name)
+		if (not force) and os.path.isfile(file_path):
+			continue
 
-		theme_file = os.path.join(bv_root, "theme" + ext)
-		# assume theme is unlikely to change
-		if not os.path.isfile(theme_file):
-			await util.fetch(theme_url, theme_file)
+		if not url_list:
+			core.touch(file_path)
+			continue
+
+		for url in url_list:
+			try:
+				stall and await stall()
+				await core.fetch(sess, url, file_path)
+				break
+			except Exception:
+				logger.exception("exception in fetch part %d", cid)
+		else:
+			exception = Exception("cannot fetch %s:%d:%s after %d attempts", bvid, cid, name, len(url_list))
+
+	if exception is not None:
+		raise exception
+
+
+async def fetch_cover(sess, info, path, force, stall = None):
+	logger.debug("fetch video cover for %s, path %s, force %x" , info.get("bvid"), path, force)
+
+	url = info.get("pic")
+	ext = os.path.splitext(url)[1]
+	if not ext:
+		ext = ".jpg"
+
+	cover_file = os.path.join(path, "cover" + ext)
+	if force or not os.path.isfile(cover_file):
+		stall and await stall()
+		await core.fetch(sess, url, cover_file)
 	else:
-		logger.warning("missing theme image")
+		logger.debug("skip cover")
 
 
+async def fetch_danmaku(sess, cid, path, force, stall = None):
+	logger.debug("fetch danmaku for %d, path %s, force %x", cid, path, force)
 
-async def do_fix(bv, path, credential):
-	with util.locked_path(path, bv) as bv_root:
+	xml_file = os.path.join(path, "danmaku.xml")
+	url = DANMAKU_URL % cid
+	if force or not os.path.isfile(xml_file):
+		stall and await stall()
+		await core.fetch(sess, url, xml_file)
+	else:
+		logger.debug("skip danmaku")
+
+
+async def fetch_subtitle(sess, info, cid, path, force, stall = None):
+	logger.warning("subtitle not implemented, skip")
+	return
+
+
+async def do_fix(sess, bv, path, stall = None, **kwargs):
+	with core.locked_path(path, bv) as bv_root:
 		info = None
+		exception = None
 
 		stat = verify_bv(bv_root)
 		for k, v in stat.items():
 			if not v:
 				break
 		else:
-			logger.info("skip existing " + bv)
+			logger.info("skip existing %s", bv)
 			return
 
-		logger.info("fixing " + bv)
-		v = video.Video(bvid = bv, credential = credential)
+		logger.info("fixing %s", bv)
 		if not stat.get("info", False):
-			info = await fetch_info(v)
-			util.save_json(info, os.path.join(bv_root, "info.json"))
+			info = await fetch_info(sess, bv, stall)
+			save_info(info, bv_root)
 
 			stat = verify_bv(bv_root)
 			for k, v in stat.items():
@@ -254,12 +260,16 @@ async def do_fix(bv, path, credential):
 					raise Exception("failed to fix " + bv)
 
 		if not stat.get("cover", False):
-			info = info or await fetch_info(v)
-			await fetch_cover(info, bv_root, True)
+			info = info or await fetch_info(sess, bv, stall)
+			try:
+				await fetch_cover(sess, info, bv_root, True, stall)
+			except Exception as e:
+				logger.exception("")
+				exception = e
 
 		if not stat.get("graph", True):
-			info = info or await fetch_info(v)
-			await save_interactive(info.get("interactive"), bv_root)
+			info = info or await fetch_info(sess, bv, stall)
+			save_interactive(info.get("interactive"), bv_root)
 
 		for k, r in stat.items():
 			if r:
@@ -269,44 +279,55 @@ async def do_fix(bv, path, credential):
 			if not match:
 				continue
 
-			logger.debug("fixing " + k)
+			logger.debug("fixing %s", k)
 			t = match.group(1)
 			cid = int(match.group(2))
 
-			with util.locked_path(bv_root, str(cid)) as part_root:
-				if t == 'V':
-					await fetch_part(v, cid, part_root, True)
-				elif t == 'D':
-					await fetch_danmaku(cid, part_root, True)
-				elif t == 'S':
-					info = info or await fetch_info(v)
-					await fetch_subtitle(info, cid, part_root, True)
+			with core.locked_path(bv_root, str(cid)) as part_root:
+				try:
+					if t == 'V':
+						await fetch_part(sess, bv, cid, part_root, True, stall, **kwargs)
+					elif t == 'D':
+						await fetch_danmaku(sess, cid, part_root, True, stall)
+					elif t == 'S':
+						info = info or await fetch_info(sess, bv, stall)
+						await fetch_subtitle(sess, info, cid, part_root, True, stall)
+				except Exception as e:
+					logger.exception()
+					exception = e
 
 		stat = verify_bv(bv_root)
 		for k, v in stat.items():
 			if not v:
-				raise Exception("failed to fix " + bv)
+				break
+		else:
+			logger.info("fixed " + bv)
+			return
 
-	logger.info("fixed " + bv)
+		if exception is None:
+			exception = Exception("failed to fix " + bv)
+
+		raise exception
 
 
-async def do_update(bv, path, credential, force):
-	v = video.Video(bvid = bv, credential = credential)
+async def do_update(sess, bv, path, force, stall = None, **kwargs):
+	info = await fetch_info(sess, bv, stall)
 
-	info = await fetch_info(v)
 	logger.info("downloading %s, title %s", bv, info.get("title", ""))
+	exception = None
 
-	with util.locked_path(path, bv) as bv_root:
-		logger.debug("save video info")
-		util.save_json(info, os.path.join(bv_root, "info.json"))
+	with core.locked_path(path, bv) as bv_root:
+		save_info(info, bv_root)
 
-		cover_result = await fetch_cover(info, bv_root, force)
+		try:
+			await fetch_cover(sess, info, bv_root, force, stall)
+		except Exception as e:
+			logger.exception("error in fetching cover for %s", bv)
+			exception = e
 
-		part_list = None
 		if "interactive" in info:
-			iv_info = info.get("interactive")
 			part_list = iv_info.get("nodes")
-			await save_interactive(iv_info, bv_root)
+			save_interactive(info, bv_root)
 		else:
 			part_list = info.get("pages")
 
@@ -316,87 +337,89 @@ async def do_update(bv, path, credential, force):
 		for part in part_list:
 			cid = int(part.get("cid"))
 			logger.info("downloading %d, %s", cid, part.get("part", None) or part.get("title", ""))
-			with util.locked_path(bv_root, str(cid)) as part_root:
-				result = await fetch_part(v, cid, part_root, force)
+			with core.locked_path(bv_root, str(cid)) as part_root:
 
-				# always update danmaku
-				result = await fetch_danmaku(cid, part_root, True) and result
+				try:
+					await fetch_part(sess, bv, cid, part_root, force, stall, **kwargs)
 
-				if info.get("subtitle"):
-					result = await fetch_subtitle(info, cid, part_root, force) and result
+					# always update danmaku
+					await fetch_danmaku(sess, cid, part_root, True, stall)
 
-				if result:
+					if info.get("subtitle"):
+						await fetch_subtitle(sess, info, cid, part_root, force, stall)
+
 					finished_parts += 1
-				else:
-					logger.error("error in downloading " + str(cid))
+				except Exception as e:
+					logger.exception("error in downloading %d", cid)
+					exception = e
 
 	logger.info("finished %s, part %d/%d", bv, finished_parts, len(part_list))
-	if cover_result and (finished_parts == len(part_list)):
-		return
-	else:
-		raise Exception("failed to update " + bv)
+
+	if exception is not None:
+		raise exception
 
 
-async def fetch_bv(bv, video_root, mode, credential = None):
+# methods
+
+async def download(sess, bv, video_root, mode, **kwargs):
 	if mode == "fix" and not os.path.isfile(os.path.join(video_root, bv, "info.json")):
 		mode = "update"
 
-	logger.debug("downloading %s, path %s, mode %s, auth %x", bv, video_root, mode, bool(credential))
+	logger.debug("downloading %s, path %s, mode %s", bv, video_root, mode)
 
 	if mode == "fix":
-		await do_fix(bv, video_root, credential)
+		await do_fix(sess, bv, video_root, **kwargs)
 	else:
-		await do_update(bv, video_root, credential, mode == "force")
+		await do_update(sess, bv, video_root, mode == "force", **kwargs)
 
 
-
-async def download(bv_list, video_root, credential = None, mode = None):
-	if not mode:
-		mode = "fix"
-
+async def batch_download(sess, bv_list, video_root, mode, **kwargs):
 	logger.info("downloading %d videos", len(bv_list))
 	fetched_video = 0
+	stall = core.Stall()
 	for bv in bv_list:
 		fetch_status = False
 		try:
-			assert(bv_pattern.fullmatch(bv))
-			await fetch_bv(bv, video_root, mode, credential)
+			assert(core.bv_pattern.fullmatch(bv))
+			await download(sess, bv, video_root, mode, **kwargs)
 			fetched_video += 1
 			fetch_status = True
 		except Exception as e:
 			logger.exception("failed to fetch video %s", bv)
 
-		util.report("video", fetch_status, bv)
+		core.report("video", fetch_status, bv)
+		await stall()
 
 	logger.info("finished downloading videos %d/%d", fetched_video, len(bv_list))
 
 
-async def main(args):
-	credential = None
-	if args.auth:
-		credential = await util.credential(args.auth)
+# entrance
 
+async def main(args):
+	prefer = args.prefer or DEFAULT_PREFER
+	reject = args.reject or DEFAULT_REJECT
 	if len(args.inputs) > 0:
 		logger.debug("%d BV on cmdline", len(args.inputs))
 		bv_list = args.inputs
 	else:
 		logger.debug("scan BV in " + (args.dir or "(cwd)"))
-		bv_list = util.list_bv(args.dir)
+		bv_list = core.list_bv(args.dir)
 
 	logger.info("BV count %d, mode %s", len(bv_list), args.mode)
 	logger.debug(bv_list)
 
-	video_root = args.dir or util.subdir("video")
-	await download(bv_list, video_root, mode = args.mode, credential = credential)
+	video_root = args.dir or core.subdir("video")
+	async with core.session(args.credential) as sess:
+		await batch_download(sess, bv_list, video_root, mode = args.mode, prefer = prefer, reject = reject)
 
 
 if __name__ == "__main__":
-	args = util.parse_args([
+	args = core.parse_args([
 		(("inputs",), {"nargs" : '*'}),
 		(("-d", "--dir"), {}),
-		(("-u", "--auth"), {}),
-		(("-m", "--mode"), {"choices" : ["fix", "update", "force"]}),
+		(("-m", "--mode"), {"choices" : ["fix", "update", "force"], "default": "fix"}),
+		(("--prefer",), {}),
+		(("--reject",), {})
 	])
-	util.run(main(args))
-
+	asyncio.run(main(args))
 

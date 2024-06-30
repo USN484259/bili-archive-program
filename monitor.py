@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 
 import os
-import core
-import asyncio
-import httpx
 import json
+import signal
+import asyncio
 import logging
 import multiprocessing
+
+import core
 import live_rec
 
 # constants
@@ -32,6 +33,7 @@ async def record_main(rid, path, credential):
 
 
 def exec_record(*args):
+	signal.signal(signal.SIGUSR1, signal.SIG_IGN)
 	asyncio.run(record_main(*args))
 	os._exit(0)
 
@@ -58,38 +60,57 @@ async def task_start(record, rid, path, credential):
 	record["task"] = task
 
 
+class Config:
+	def __init__(self, args):
+		self.config_path = args.config
+		self.live_root = args.dir or core.subdir("live")
+		self.credential = args.credential
+		self.records = {}
+		self.update()
+
+	def update(self):
+		logger.debug("loading config from %s", self.config_path)
+		with open(self.config_path, "r") as f:
+			user_list = json.load(f)
+
+		new_records = {}
+		for elem in user_list:
+			uid = elem["uid"]
+			elem["task"] = None
+			new_records[uid] = elem
+
+		for uid, rec in self.records.items():
+			if rec["task"] is None:
+				continue
+
+			if uid not in new_records:
+				rec["remove"] = True
+				new_records[uid] = rec
+			else:
+				new_records[uid]["task"] = rec["task"]
+
+		self.records = new_records
+
+
 # methods
 
-def load_config(args):
-	config = {
-		"live_root": args.dir or core.subdir("live"),
-		"credential": args.credential,
-	}
-	with open(args.config, "r") as f:
-		user_list = json.load(f)
-
-	records = {}
-	for elem in user_list:
-		uid = elem["uid"]
-		elem["task"] = None
-		records[uid] = elem
-
-	config["records"] = records
-	return config
-
-
 async def monitor_check(sess, config):
-	records = config.get("records")
+	records = config.records
 	uid_list = list(records.keys())
 	logger.info("checking %d live rooms", len(uid_list))
 
 	info_map = await get_live_info(sess, uid_list)
 	active_rooms = []
+	remove_list = {}
 	for uid, record in records.items():
 		name = record.get("name", str(uid))
 
 		if not await task_cleanup(record):
 			active_rooms.append(name)
+			continue
+
+		if record.get("remove"):
+			remove_list[uid] = name
 			continue
 
 		info = info_map.get(str(uid))
@@ -111,19 +132,30 @@ async def monitor_check(sess, config):
 		uname = info.get("uname", str(uid))
 		title = info.get("title", "")
 		rec_name = live_rec.make_record_name(uname, title)
-		rec_path = os.path.join(config.get("live_root"), rec_name)
+		rec_path = os.path.join(config.live_root, rec_name)
 		logger.info("start recording %s, room %d, %s", name, rid, rec_name)
 
-		await task_start(record, rid, rec_path, config.get("credential"))
+		await task_start(record, rid, rec_path, config.credential)
 		active_rooms.append(name)
 
 	logger.info("active live rooms %d %s", len(active_rooms), " ".join(active_rooms))
+
+	for uid, name in remove_list.items():
+		logger.info("remove monitoring of %s(%d)", name, uid)
+		assert(records[uid]["task"] is None)
+		del records[uid]
 
 
 # entrance
 
 async def main(args):
-	config = load_config(args)
+	config = Config(args)
+
+	def sig_handler(signum, frame):
+		logger.info("reloading config")
+		config.update()
+
+	signal.signal(signal.SIGUSR1, sig_handler)
 	async with core.session(args.credential) as sess:
 		while True:
 			try:
