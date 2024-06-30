@@ -19,6 +19,18 @@ video {
 	</style>
 	<script>
 
+const split_pattern = new RegExp(".+[.]([^.]+)")
+
+
+function load_js(url, func, path) {
+	let scriptTag = document.createElement('script');
+	scriptTag.src = url;
+	scriptTag.onload = function() {
+		func(path);
+	};
+
+	document.getElementsByTagName("body")[0].appendChild(scriptTag);
+}
 
 function play_flv(path) {
 	if (flvjs.isSupported()) {
@@ -34,45 +46,10 @@ function play_flv(path) {
 
 }
 
-function build_manifest(data) {
-	file_list = JSON.parse(data);
-
-	media_list_header = "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:1\n";
-	media_list = "";
-	file_list.forEach((file) => {
-		if (file.name[0] == 'h') {
-			media_list_header += `#EXT-X-MAP:URI=\"${file.name}\"\n`
-		} else {
-			media_list += `#EXTINF:1,\n${file.name}\n`
-		}
-	});
-
-	return media_list_header + media_list + "#EXT-X-ENDLIST\n";
-}
-
-class CustomLoader extends Hls.DefaultConfig.loader {
-	constructor(config) {
-		super(config);
-		var load = this.load.bind(this);
-		this.load = function (context, config, callbacks) {
-			if (context.type == 'manifest') {
-				var onSuccess = callbacks.onSuccess;
-				callbacks.onSuccess = function (response, stats, context) {
-					response.data = build_manifest(response.data);
-					onSuccess(response, stats, context);
-				};
-			}
-			load(context, config, callbacks);
-		};
-	}
-}
-
 function play_hls(path) {
 	if (Hls.isSupported()) {
 		let videoElement = document.getElementById('video');
-		let hls = new Hls({
-			pLoader: CustomLoader
-		});
+		let hls = new Hls();
 		hls.on(Hls.Events.ERROR, function (ev, data) {
 			console.log(data);
 		});
@@ -81,17 +58,85 @@ function play_hls(path) {
 	}
 }
 
-const re_type = new RegExp("[?&]type=([^&]+)")
-const re_path = new RegExp("[?&]path=([^&]+)")
-let type = document.location.search.match(re_type)[1]
-let path = document.location.search.match(re_path)[1]
-console.log(type, path);
-if (path) {
-	if (type == "flv")
-		play_flv(path);
-	else if (type == "hls")
-		play_hls(path);
+function play_video(path) {
+	if (!path.endsWith('/'))
+		path += '/';
+	fetch(path).then((resp) => (resp.headers.get("content-type")?.includes("/json")) ? resp.json() : null).then((dir_list) => {
+		console.log(dir_list)
+
+		let best_video = 0;
+		let best_audio = 0;
+
+		for (let entry of dir_list) {
+			if (entry.type != "file")
+				continue;
+
+			let name = entry.name;
+			let ext = name.match(split_pattern)[1];
+			console.log(ext, name);
+
+			if (ext == "flv") {
+				load_js("/flv.min.js", play_flv, path + name);
+				return;
+			} else if (ext == "m4v") {
+				let cur_id = parseInt(name);
+				if (cur_id > best_video)
+					best_video = cur_id;
+			} else if (ext == "m4a") {
+				let cur_id = parseInt(name);
+				if (cur_id > best_audio)
+					best_audio = cur_id;
+			}
+		}
+
+		let videoElement = document.getElementById('video');
+
+		if (best_video > 0) {
+			let videoElement = document.getElementById('video');
+			let video_url = path + best_video + ".m4v";
+			videoElement.setAttribute("src", video_url);
+			videoElement.load();
+		}
+		if (best_audio > 0) {
+			let audioElement = document.createElement('audio');
+			videoElement.parentNode.insertBefore(audioElement, videoElement.nextSibling);
+			let audio_url = path + best_audio + ".m4a";
+			audioElement.setAttribute("src", audio_url);
+			audioElement.load();
+
+			videoElement.onseeking = function() { audioElement.fastSeek(videoElement.currentTime); };
+			videoElement.onseeked = function() { audioElement.currentTime = videoElement.currentTime; };
+			videoElement.onplay = function() { audioElement.currentTime = videoElement.currentTime; audioElement.play(); };
+			videoElement.onpause = function() { audioElement.pause(); };
+
+			videoElement.onkeydown = function(ev) {
+				if (ev.key == "ArrowUp")
+					audioElement.volume = Math.min(1, audioElement.volume + 0.1);
+				else if (ev.key == "ArrowDown")
+					audioElement.volume = Math.max(0, audioElement.volume - 0.1);
+				else
+					return;
+				console.log("volume " + audioElement.volume);
+			};
+		}
+	});
 }
+
+addEventListener("DOMContentLoaded", () => {
+	const path_pattern = new RegExp("[&?]path=(.+)");
+	let path = document.location.search.match(path_pattern)[1];
+	if (path) {
+		if (path.endsWith(".flv"))
+			load_js("/flv.min.js", play_flv, path);
+		else if (path.endsWith(".m3u8"))
+			load_js("/hls.min.js", play_hls, path);
+		else
+			play_video(path);
+	}
+
+})
+
+
 	</script>
 </body>
 </html>
