@@ -8,6 +8,8 @@ import logging
 import multiprocessing
 
 import core
+import runtime
+import network
 import live_rec
 
 # constants
@@ -22,12 +24,12 @@ multiprocessing = multiprocessing.get_context("fork")
 # helper functions
 
 async def get_live_info(sess, uid_list):
-	info_map = await core.request(sess, "POST", MONITOR_QUERY_URL, json = {"uids": uid_list})
+	info_map = await network.request(sess, "POST", MONITOR_QUERY_URL, json = {"uids": uid_list})
 	return info_map
 
 
-async def record_main(rid, path, credential):
-	async with core.session(credential) as sess:
+async def record_main(rid, path):
+	async with network.session() as sess:
 		with core.locked_path(path) as rec_path:
 			await live_rec.record(sess, rid, rec_path)
 
@@ -50,11 +52,11 @@ async def task_cleanup(record):
 	return True
 
 
-async def task_start(record, rid, path, credential):
+async def task_start(record, rid, path):
 	assert(record.get("task") is None)
 	task = multiprocessing.Process(
 		target = exec_record, args = (
-			rid, path, credential
+			rid, path
 		), daemon = False)
 	task.start()
 	record["task"] = task
@@ -63,8 +65,7 @@ async def task_start(record, rid, path, credential):
 class Config:
 	def __init__(self, args):
 		self.config_path = args.config
-		self.live_root = args.dir or core.subdir("live")
-		self.credential = args.credential
+		self.live_root = args.dir or runtime.subdir("live")
 		self.records = {}
 		self.update()
 
@@ -135,7 +136,7 @@ async def monitor_check(sess, config):
 		rec_path = os.path.join(config.live_root, rec_name)
 		logger.info("start recording %s, room %d, %s", name, rid, rec_name)
 
-		await task_start(record, rid, rec_path, config.credential)
+		await task_start(record, rid, rec_path)
 		active_rooms.append(name)
 
 	logger.info("active live rooms %d %s", len(active_rooms), " ".join(active_rooms))
@@ -156,7 +157,7 @@ async def main(args):
 		config.update()
 
 	signal.signal(signal.SIGUSR1, sig_handler)
-	async with core.session(args.credential) as sess:
+	async with network.session() as sess:
 		while True:
 			try:
 				await monitor_check(sess, config)
@@ -169,9 +170,8 @@ async def main(args):
 
 
 if __name__ == "__main__":
-	args = core.parse_args([
+	args = runtime.parse_args(("network", "auth", "dir", "prefer"), [
 		(("-c", "--config"), {"required": True}),
-		(("-d", "--dir"), {}),
 		(("-i", "--interval"), {"type" : int, "default" : 30}),
 	])
 	asyncio.run(main(args))

@@ -9,6 +9,8 @@ import logging
 import collections
 
 import core
+import runtime
+import network
 import verify
 
 # constants
@@ -29,13 +31,13 @@ codec_name_map = collections.defaultdict(lambda: "unknown", [
 	(13, "av1"),
 ])
 
-logger = logging.getLogger("bili_arch.live_rec")
+logger = logging.getLogger("bili_arch.video")
 part_pattern = re.compile(r"([VSD]):(\d+)")
 
 # helper functions
 
 async def get_bv_info(sess, bvid):
-	info = await core.request(sess, "GET", BV_INFO_URL, params = {"bvid": bvid})
+	info = await network.request(sess, "GET", BV_INFO_URL, params = {"bvid": bvid})
 	return info
 
 
@@ -47,7 +49,7 @@ async def get_play_info(sess, bvid, cid):
 		"qn": 112,
 		"fnval": 16,
 	}
-	info = await core.request(sess, "GET", PLAY_INFO_URL, params = params)
+	info = await network.request(sess, "GET", PLAY_INFO_URL, params = params)
 	return info
 
 
@@ -66,9 +68,8 @@ def save_interactive(iv_info, path):
 
 
 def save_info(info, bv_root):
-	# TODO rotate history
 	file_path = os.path.join(bv_root, "info.json")
-	with core.staged_file(file_path, "w") as f:
+	with core.staged_file(file_path, "w", rotate = True) as f:
 		json.dump(info, f, indent = '\t', ensure_ascii = False)
 
 
@@ -101,7 +102,7 @@ def find_best_url_dash(info, *, prefer, reject):
 		if not url_info:
 			norej_info = find_best(info.get(name, []), prefer)
 			if norej_info:
-				logger.warning("bad reject: ", reject)
+				logger.warning("bad reject: %s", reject)
 				url_info = norej_info
 
 		if url_info:
@@ -192,10 +193,10 @@ async def fetch_part(sess, bvid, cid, path, force, /, stall = None, *, prefer = 
 		for url in url_list:
 			try:
 				stall and await stall()
-				await core.fetch(sess, url, file_path)
+				await network.fetch(sess, url, file_path)
 				break
 			except Exception:
-				logger.exception("exception in fetch part %d", cid)
+				logger.exception("failed to fetch part %d", cid)
 		else:
 			exception = Exception("cannot fetch %s:%d:%s after %d attempts", bvid, cid, name, len(url_list))
 
@@ -214,7 +215,7 @@ async def fetch_cover(sess, info, path, force, stall = None):
 	cover_file = os.path.join(path, "cover" + ext)
 	if force or not os.path.isfile(cover_file):
 		stall and await stall()
-		await core.fetch(sess, url, cover_file)
+		await network.fetch(sess, url, cover_file, rotate = True)
 	else:
 		logger.debug("skip cover")
 
@@ -226,7 +227,7 @@ async def fetch_danmaku(sess, cid, path, force, stall = None):
 	url = DANMAKU_URL % cid
 	if force or not os.path.isfile(xml_file):
 		stall and await stall()
-		await core.fetch(sess, url, xml_file)
+		await network.fetch(sess, url, xml_file, rotate = True)
 	else:
 		logger.debug("skip danmaku")
 
@@ -264,7 +265,7 @@ async def do_fix(sess, bv, path, stall = None, **kwargs):
 			try:
 				await fetch_cover(sess, info, bv_root, True, stall)
 			except Exception as e:
-				logger.exception("")
+				logger.exception("failed to fetch cover for %s", bv)
 				exception = e
 
 		if not stat.get("graph", True):
@@ -293,7 +294,7 @@ async def do_fix(sess, bv, path, stall = None, **kwargs):
 						info = info or await fetch_info(sess, bv, stall)
 						await fetch_subtitle(sess, info, cid, part_root, True, stall)
 				except Exception as e:
-					logger.exception()
+					logger.exception("failed to fetch part %d", cid)
 					exception = e
 
 		stat = verify_bv(bv_root)
@@ -301,7 +302,7 @@ async def do_fix(sess, bv, path, stall = None, **kwargs):
 			if not v:
 				break
 		else:
-			logger.info("fixed " + bv)
+			logger.info("fixed %s", bv)
 			return
 
 		if exception is None:
@@ -322,7 +323,7 @@ async def do_update(sess, bv, path, force, stall = None, **kwargs):
 		try:
 			await fetch_cover(sess, info, bv_root, force, stall)
 		except Exception as e:
-			logger.exception("error in fetching cover for %s", bv)
+			logger.exception("failed to fetch cover for %s", bv)
 			exception = e
 
 		if "interactive" in info:
@@ -350,7 +351,7 @@ async def do_update(sess, bv, path, force, stall = None, **kwargs):
 
 					finished_parts += 1
 				except Exception as e:
-					logger.exception("error in downloading %d", cid)
+					logger.exception("failed to fetch part %d", cid)
 					exception = e
 
 	logger.info("finished %s, part %d/%d", bv, finished_parts, len(part_list))
@@ -361,65 +362,58 @@ async def do_update(sess, bv, path, force, stall = None, **kwargs):
 
 # methods
 
-async def download(sess, bv, video_root, mode, **kwargs):
+async def download(sess, bv, video_root, mode, stall = None, **kwargs):
 	if mode == "fix" and not os.path.isfile(os.path.join(video_root, bv, "info.json")):
 		mode = "update"
 
 	logger.debug("downloading %s, path %s, mode %s", bv, video_root, mode)
 
 	if mode == "fix":
-		await do_fix(sess, bv, video_root, **kwargs)
+		await do_fix(sess, bv, video_root, stall, **kwargs)
 	else:
-		await do_update(sess, bv, video_root, mode == "force", **kwargs)
+		await do_update(sess, bv, video_root, mode == "force", stall, **kwargs)
 
 
 async def batch_download(sess, bv_list, video_root, mode, **kwargs):
 	logger.info("downloading %d videos", len(bv_list))
 	fetched_video = 0
-	stall = core.Stall()
+	stall = runtime.Stall()
 	for bv in bv_list:
 		fetch_status = False
 		try:
-			assert(core.bv_pattern.fullmatch(bv))
-			await download(sess, bv, video_root, mode, **kwargs)
+			assert(runtime.bv_pattern.fullmatch(bv))
+			await download(sess, bv, video_root, mode, stall, **kwargs)
 			fetched_video += 1
 			fetch_status = True
 		except Exception as e:
 			logger.exception("failed to fetch video %s", bv)
 
-		core.report("video", fetch_status, bv)
-		await stall()
+		runtime.report("video", fetch_status, bv)
 
-	logger.info("finished downloading videos %d/%d", fetched_video, len(bv_list))
+	logger.info("finish video download %d/%d", fetched_video, len(bv_list))
 
 
 # entrance
 
 async def main(args):
-	prefer = args.prefer or DEFAULT_PREFER
-	reject = args.reject or DEFAULT_REJECT
 	if len(args.inputs) > 0:
 		logger.debug("%d BV on cmdline", len(args.inputs))
 		bv_list = args.inputs
 	else:
-		logger.debug("scan BV in " + (args.dir or "(cwd)"))
-		bv_list = core.list_bv(args.dir)
+		logger.debug("scan BV in %s", args.dir or "(cwd)")
+		bv_list = runtime.list_bv(args.dir)
 
 	logger.info("BV count %d, mode %s", len(bv_list), args.mode)
 	logger.debug(bv_list)
 
-	video_root = args.dir or core.subdir("video")
-	async with core.session(args.credential) as sess:
-		await batch_download(sess, bv_list, video_root, mode = args.mode, prefer = prefer, reject = reject)
+	video_root = args.dir or runtime.subdir("video")
+	async with network.session() as sess:
+		await batch_download(sess, bv_list, video_root, mode = args.mode, prefer = args.prefer, reject = args.reject)
 
 
 if __name__ == "__main__":
-	args = core.parse_args([
+	args = runtime.parse_args(("network", "auth", "dir", "bandwidth", "video_mode", "prefer"), [
 		(("inputs",), {"nargs" : '*'}),
-		(("-d", "--dir"), {}),
-		(("-m", "--mode"), {"choices" : ["fix", "update", "force"], "default": "fix"}),
-		(("--prefer",), {}),
-		(("--reject",), {})
 	])
 	asyncio.run(main(args))
 

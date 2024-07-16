@@ -13,6 +13,7 @@ except ModuleNotFoundError:
 	from xml.sax import make_parser as xml_make_parser
 
 import core
+import runtime
 
 
 logger = logging.getLogger("bili_arch.verify")
@@ -32,9 +33,9 @@ xml_parser = xml_make_parser()
 def ffprobe(path):
 	result = {}
 	try:
-		logger.debug("running ffprobe on " + path)
+		logger.debug("running ffprobe on %s", path)
 		cmdline = [ffprobe_bin]
-		if logger.isEnabledFor(logging.DEBUG):
+		if not logger.isEnabledFor(logging.DEBUG):
 			cmdline = cmdline + ["-v", "8"]
 
 		cmdline = cmdline + ffprobe_options + [path]
@@ -42,7 +43,7 @@ def ffprobe(path):
 			result = json.load(proc.stdout)
 
 	except Exception as e:
-		logger.exception("exception on ffprobe for " + path)
+		logger.exception("exception on ffprobe for %s", path)
 
 	return result
 
@@ -60,7 +61,7 @@ def verify_media(path, part_duration, duration_tolerance):
 				media_duration = media_info.get("format").get("duration")
 			media_duration = float(media_duration)
 
-			logger.debug("stream %d, type %s, duration %f", media.get("index"), media_type, media_duration or math.nan)
+			logger.debug("stream %d, type %s, duration %.1f/%.1f", media.get("index"), media_type, media_duration or math.nan, part_duration or math.nan)
 
 			if not duration_tolerance:
 				logger.debug("skip duration check")
@@ -77,7 +78,7 @@ def verify_media(path, part_duration, duration_tolerance):
 
 		return vc, ac
 	except Exception as e:
-		logger.exception("exception on verify media for " + path)
+		logger.exception("exception on verify media for %s", path)
 		return 0, 0
 
 
@@ -89,7 +90,7 @@ def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = 
 		"info" : False,
 	}
 	try:
-		logger.debug("verify video %s, scan %s, tolerance %f", bv_root, scan_files, duration_tolerance or math.nan)
+		logger.debug("verify video %s, scan %s, tolerance %.1f", bv_root, scan_files, duration_tolerance or math.nan)
 
 		logger.debug("loading video info")
 		with open(os.path.join(bv_root, "info.json"), 'r') as f:
@@ -101,21 +102,21 @@ def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = 
 			result["cover"] = False
 			for ext in [".jpg", ".png", ".gif", ".bmp"]:
 				cover_file = os.path.join(bv_root, "cover" + ext)
-				logger.debug("checking cover " + cover_file)
+				logger.debug("checking cover %s", cover_file)
 				if not os.path.isfile(cover_file):
 					continue
 				if scan_files:
 					media_info = ffprobe(cover_file)
 					try:
 						codec = media_info.get("streams")[0].get("codec_name")
-						logger.debug("cover codec " + codec)
+						logger.debug("cover codec %s", codec)
 						if codec not in ["mjpeg", "png", "gif", "bmp"]:
 							continue
 					except Exception as e:
-						logger.exception("exception on verify cover for " + cover_file)
+						logger.exception("exception on verify cover for %s", cover_file)
 						continue
 
-				logger.debug("found cover, format " + ext)
+				logger.debug("found cover, format %s", ext)
 				result["cover"] = True
 				break
 			else:
@@ -146,17 +147,19 @@ def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = 
 			cid = part.get("cid")
 			part_duration = part.get("duration", None)
 
-			logger.info("cid %d, %s, %f sec", cid, part.get("part", None) or part.get("title", ""), part_duration or math.nan)
+			logger.info("cid %d, %s, %.1f sec", cid, part.get("part", None) or part.get("title", ""), part_duration or math.nan)
 
 			video_name = "V:" + str(cid)
 			danmaku_name = "D:" + str(cid)
 			subtitle_name = "S:" + str(cid)
-			result[video_name] = False
-			result[danmaku_name] = False
+			if 'V' not in ignore:
+				result[video_name] = False
+			if 'D' not in ignore:
+				result[danmaku_name] = False
 
 			if subtitle_table:
-				subtitle = subtitle_table.get(str(cid)).get("subtitles")
-				logger.debug("subtitle count " + str(len(subtitle)))
+				subtitle = subtitle_table.get(str(cid), {}).get("subtitles", [])
+				logger.debug("subtitle count %d", len(subtitle))
 				if len(subtitle) > 0:
 					result[subtitle_name] = False
 
@@ -172,7 +175,7 @@ def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = 
 
 			logger.debug("checking %d in %s", cid, part_root)
 			for filename in os.listdir(part_root):
-				logger.debug("file " + filename)
+				logger.debug("file %s", filename)
 				ext = os.path.splitext(filename)[1].lower()
 
 				if ext == core.default_names.tmp_ext:
@@ -206,7 +209,7 @@ def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = 
 
 					if 'S' not in ignore:
 						lan = match.group(1)
-						logger.debug("type: subtitle " + lan)
+						logger.debug("type: subtitle %s", lan)
 						if scan_files:
 							try:
 								with open(os.path.join(part_root, filename), "r") as f:
@@ -215,14 +218,14 @@ def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = 
 								logger.warning("unexpected JSON format")
 								continue
 
-						logger.debug("found subtitle, lang " + lan)
+						logger.debug("found subtitle, lang %s", lan)
 						for i, sub in enumerate(subtitle):
 							if sub.get("lan") == lan:
 								del subtitle[i]
 								subtitle_count += 1
 								break
 						else:
-							logger.warning("subtitle not recorded " + lan)
+							logger.warning("subtitle not recorded %s", lan)
 
 					continue
 
@@ -266,15 +269,15 @@ def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = 
 					audio_count += 1
 					continue
 
-				logger.debug("unknown type " + ext)
+				logger.debug("unknown type %s", ext)
 
 			logger.info("video_count %d, audio_count %d, subtitle_count %d", video_count, audio_count, subtitle_count)
 			if video_count > 0 and (no_audio or audio_count > 0):
 				result[video_name] = True
-			else:
+			elif 'V' not in ignore:
 				logger.warning("missing media files")
 
-			if not result[danmaku_name]:
+			if 'D' not in ignore and not result[danmaku_name]:
 				logger.warning("missing danmaku file")
 
 			if subtitle_name in result:
@@ -283,7 +286,7 @@ def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = 
 				else:
 					logger.warning("missing subtitle %d/%d", len(subtitle), subtitle_count)
 
-		logger.debug("verify done for " + bv_info.get("bvid"))
+		logger.debug("verify done for %s", bv_info.get("bvid"))
 		result["info"] = True
 	except Exception as e:
 		logger.exception("exception in verifing %s", bv_root)
@@ -292,13 +295,13 @@ def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = 
 	return result
 
 def main(args):
-	video_root = args.dir or util.subdir("video")
+	video_root = args.dir or runtime.subdir("video")
 	if len(args.inputs) > 0:
 		logger.debug("%d BV on cmdline", len(args.inputs))
 		bv_list = args.inputs
 	else:
-		logger.debug("scan BV in " + video_root)
-		bv_list = util.list_bv(video_root)
+		logger.debug("scan BV in %s", video_root)
+		bv_list = runtime.list_bv(video_root)
 
 	logger.info("BV count %d", len(bv_list))
 
@@ -309,7 +312,7 @@ def main(args):
 	verified_count = 0
 	for bv in bv_list:
 		bv_root = os.path.join(video_root, bv)
-		result = verify_bv(bv_root, scan_files = args.scan, duration_tolerance = tolerance)
+		result = verify_bv(bv_root, ignore = args.ignore, scan_files = args.scan, duration_tolerance = tolerance)
 		res = True
 		for k, v in result.items():
 			if not v:
@@ -318,16 +321,16 @@ def main(args):
 		else:
 			verified_count += 1
 
-		util.report("video", res, bv)
+		runtime.report("video", res, bv)
 
 	logger.info("finished verify video %d/%d", verified_count, len(bv_list))
 
 
 if __name__ == "__main__":
-	args = util.parse_args([
-		(("-d", "--dir"), {}),
+	args = runtime.parse_args(("dir",), [
 		(("inputs",), {"nargs" : '*'}),
 		(("--scan",), {"action" : "store_true"}),
-		(("--tolerance",), {"type" : float})
+		(("--tolerance",), {"type" : float}),
+		(("--ignore",), {"default": ""}),
 	])
 	main(args)

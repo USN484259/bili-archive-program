@@ -7,6 +7,8 @@ import zipfile
 import logging
 
 import core
+import runtime
+import network
 import hls
 
 # constants
@@ -39,12 +41,12 @@ def get_url_path(base_url):
 
 
 async def get_live_info(sess, rid):
-	info = await core.request(sess, "GET", LIVE_QUERY_URL, params = {"room_id" : rid})
+	info = await network.request(sess, "GET", LIVE_QUERY_URL, params = {"room_id" : rid})
 	return info
 
 
 async def get_user_info(sess, uid):
-	info = await core.request(sess, "GET", LIVE_USER_URL, params = {"uid": uid})
+	info = await network.request(sess, "GET", LIVE_USER_URL, params = {"uid": uid})
 	return info
 
 
@@ -56,7 +58,7 @@ async def get_live_url(sess, rid):
 		"codec": "0,1",
 		"qn": 10000
 	}
-	info = await core.request(sess, "GET", LIVE_PLAY_URL, params = params)
+	info = await network.request(sess, "GET", LIVE_PLAY_URL, params = params)
 	return info
 
 
@@ -167,7 +169,7 @@ async def record_hls(sess, info, name_prefix):
 
 						last_url_index = cur_url_index
 						if not stall:
-							stall = core.Stall(m3u.duration)
+							stall = runtime.Stall(m3u.duration)
 
 					except Exception as e:
 						logger.exception("exception on fetching index")
@@ -197,7 +199,7 @@ async def record(sess, rid, path, *, prefer = None, reject = None):
 		logger.debug("prefer %s, reject %s", prefer, reject)
 
 		stat_fail_count = 0
-		stall = core.Stall(LIVE_STAT_STALL_TIME)
+		stall = runtime.Stall(LIVE_STAT_STALL_TIME)
 		while True:
 			start_time = time.time()
 			info = None
@@ -244,9 +246,9 @@ async def record(sess, rid, path, *, prefer = None, reject = None):
 # entrance
 
 async def main(args):
-	live_root = args.dir or core.subdir("live")
+	live_root = args.dir or runtime.subdir("live")
 	user_info = {}
-	async with core.session(args.credential) as sess:
+	async with network.session() as sess:
 		while True:
 			try:
 				info = await get_live_info(sess, args.room)
@@ -277,12 +279,9 @@ async def main(args):
 
 
 if __name__ == "__main__":
-	args = core.parse_args([
+	args = runtime.parse_args(("network", "auth", "dir", "prefer"), [
 		(("room",), {"type" : int}),
-		(("-d", "--dir"), {}),
 		(("-i", "--interval"), {"type" : int, "default" : 30}),
 		(("--monitor",),{"action" : "store_true"}),
-		(("--prefer",), {}),
-		(("--reject",), {})
 	])
 	asyncio.run(main(args))
