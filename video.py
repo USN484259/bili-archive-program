@@ -381,7 +381,7 @@ async def batch_download(sess, bv_list, video_root, mode, **kwargs):
 	for bv in bv_list:
 		fetch_status = False
 		try:
-			assert(runtime.bv_pattern.fullmatch(bv))
+			assert(core.bv_pattern.fullmatch(bv))
 			await download(sess, bv, video_root, mode, stall, **kwargs)
 			fetched_video += 1
 			fetch_status = True

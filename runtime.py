@@ -18,7 +18,6 @@ root_dir = "."
 credential = {}
 
 logger = logging.getLogger("bili_arch.runtime")
-bv_pattern = re.compile(r"(BV\w+)")
 
 
 standard_args = {
@@ -61,7 +60,7 @@ def load_credential(auth_file):
 
 ## startup & runtime
 
-def parse_args(std_args, extra_args = ()):
+def parse_args(std_args, extra_args = (), *, arg_list = None):
 	global http_timeout
 	global default_stall_time
 	global bandwidth_limit
@@ -72,19 +71,19 @@ def parse_args(std_args, extra_args = ()):
 	parser.add_argument("-q", "--quiet", action = "count", default = 0)
 	parser.add_argument("-l", "--log")
 
-	arg_list = []
+	option_list = []
 	for stdarg_name in std_args:
-		arg_list += standard_args.get(stdarg_name)
+		option_list += standard_args.get(stdarg_name)
 
-	arg_list += extra_args
+	option_list += extra_args
 
-	for args, kwargs in arg_list:
+	for args, kwargs in option_list:
 		parser.add_argument(*args, **kwargs)
 
-	args = parser.parse_args()
+	args = parser.parse_args(arg_list)
 
 	log_level = logging.INFO + 10 * (args.quiet - args.verbose)
-	logging.basicConfig(level = log_level, format = core.LOG_FORMAT)
+	logging.basicConfig(level = log_level, format = core.LOG_FORMAT, force = True)
 	root_logger = logging.getLogger()
 
 	if args.log:
@@ -140,7 +139,7 @@ def subdir(key):
 def list_bv(path):
 	bv_list = []
 	for f in os.listdir(path):
-		if bv_pattern.fullmatch(f):
+		if core.bv_pattern.fullmatch(f):
 			bv_list.append(f)
 
 	return bv_list

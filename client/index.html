@@ -42,19 +42,16 @@ function size_postfix(size) {
 }
 
 const path_pattern = new RegExp("^(.*/)[^/]+$")
-const cwd_pattern = new RegExp("^(.*/)([^/]+)/$")
+let localtime = new Intl.DateTimeFormat(undefined, {dateStyle: "medium", timeStyle: "medium"})
 
 addEventListener("DOMContentLoaded", () => {
 	let path = document.location.pathname.split(path_pattern)[1]
 	console.log(path)
 	let parent_path = null
-	let cwd_name = ""
 	if (path != "/") {
-		let cwd_match = path.split(cwd_pattern)
-		parent_path = cwd_match[1]
-		cwd_name = cwd_match[2]
+		let parent_match = path.split(path_pattern)
+		parent_path = parent_match[1]
 	}
-	console.log(parent_path, cwd_name)
 
 	let title_elem = document.getElementById("title")
 	title_elem.append("Index of " + decodeURIComponent(path))
@@ -110,7 +107,7 @@ addEventListener("DOMContentLoaded", () => {
 
 			// mtime
 			let mtime_elem = document.createElement("td")
-			mtime_elem.append(new Date(entry.mtime).toLocaleString())
+			mtime_elem.append(localtime.format(new Date(entry.mtime)))
 
 			// action
 			let action_elem = document.createElement("td")
@@ -120,9 +117,13 @@ addEventListener("DOMContentLoaded", () => {
 				zip_elem.setAttribute("href", zip_url)
 				zip_elem.append("browse")
 				action_elem.append(zip_elem)
-			}
-			if ((cwd_name.toLowerCase().startsWith("bv") && name.endsWith('/'))
-				|| name.endsWith(".flv") || name.endsWith(".m3u8")) {
+			} else if (name.toLowerCase().startsWith("bv") && name.endsWith('/')) {
+				let bv_elem = document.createElement("a")
+				let video_page_url = "/video_page.html?path=" + url
+				bv_elem.setAttribute("href", video_page_url)
+				bv_elem.append("play")
+				action_elem.append(bv_elem)
+			} else if (name.endsWith(".flv") || name.endsWith(".m3u8")) {
 				let player_elem = document.createElement("a")
 				let player_url = "/player.html?path=" + url
 				player_elem.setAttribute("href", player_url)

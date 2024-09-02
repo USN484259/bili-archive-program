@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+</head>
+<body>
+	<img id="frame" />
+	<div id="info">
+		<h3 id="title"></h3>
+		<span id="author"></span>
+		<span id="uptime"></span>
+		<textarea id="desc" readonly></textarea>
+	</div>
+	<ul id="parts"></ul>
+
+	<style>
+
+body {
+	margin: 10px;
+}
+
+#frame {
+	width: 100%;
+	height: 80vh;
+	max-width: 100%;
+	object-fit: contain;
+
+}
+
+#title {
+	width: 100%;
+}
+
+#desc {
+	width: 100%;
+	min-height: 20vh;
+	resize: vertical;
+}
+
+#info {
+	width: 90%;
+}
+
+#uptime {
+	float: right;
+}
+
+ul {
+	max-width: 90%;
+	list-style-type: decimal;
+}
+
+li:nth-child(odd) {
+	background-color: #cccccc;
+}
+
+li:nth-child(even) {
+	background-color: #eeeeee;
+}
+
+.duration {
+	float: right;
+}
+
+	</style>
+	<script>
+
+function time_str(time_sec) {
+	let result = ""
+	let hour = Math.floor(time_sec / 3600)
+	let min = Math.floor((time_sec % 3600) / 60)
+	let sec = time_sec % 60
+	return ((hour > 0) ? (toString(hour) + ':') : "") + min.toLocaleString(undefined, {minimumIntegerDigits: 2}) + ':' + sec.toLocaleString(undefined, {minimumIntegerDigits: 2})
+}
+
+function load_video() {
+	const part_pattern = new RegExp("^#(\\d+)");
+	console.log(location.hash)
+	let match = location.hash.match(part_pattern)
+	if (!match)
+		return false;
+	let part_id = match[1];
+	let cid_elem = document.getElementById('P' + part_id)
+	let path = cid_elem.textContent
+	console.log(path)
+	let old_frame = document.getElementById("frame")
+	let frame = document.createElement("iframe")
+	frame.setAttribute("id", "frame")
+	frame.setAttribute("allow", "fullscreen")
+	frame.setAttribute("src", "/player.html?path=" + path)
+	old_frame.replaceWith(frame)
+
+	frame.focus({preventScroll: true})
+	return true;
+}
+
+window.addEventListener("hashchange", load_video);
+
+addEventListener("DOMContentLoaded", () => {
+	const path_pattern = new RegExp("[&?]path=(.+)");
+	let path = document.location.search.match(path_pattern)[1];
+	if (!path.endsWith('/'))
+		path += '/'
+	fetch(path + "info.json").then((resp) => resp.json()).then((info) => {
+		document.getElementById("title").append(info.title)
+		document.getElementById("uptime").append(new Date(info.pubdate * 1000).toLocaleString())
+
+		// authors
+		let authors = ""
+		if (info.staff) {
+			for (let coop of info.staff) {
+				authors += " " + coop.name
+			}
+		} else {
+			authors = info.owner.name
+		}
+		document.getElementById("author").append(authors)
+		document.getElementById("desc").append(info.desc)
+
+		// parts
+		let list_elem = document.getElementById("parts")
+		for (let part of info.pages) {
+			let part_id = part.page.toString()
+			let li_elem = document.createElement("li")
+			let part_elem = document.createElement("a")
+			part_elem.setAttribute("href", '#' + part_id)
+			let title_elem = document.createElement("span")
+			title_elem.append(part.part)
+			let duration_elem = document.createElement("span")
+			duration_elem.setAttribute("class", "duration")
+			duration_elem.append(time_str(part.duration))
+
+			part_elem.appendChild(title_elem)
+			part_elem.appendChild(duration_elem)
+
+			cid_elem = document.createElement("input")
+			cid_elem.setAttribute("type", "hidden")
+			cid_elem.setAttribute("id", 'P' + part_id)
+
+			cid_elem.append(path + part.cid)
+
+			li_elem.appendChild(part_elem)
+			li_elem.appendChild(cid_elem)
+			list_elem.appendChild(li_elem)
+		}
+
+		if (!load_video()) {
+			// cover
+			let cover_ext = info.pic.split('.').pop()
+			let cover_path = path + "cover." + cover_ext
+			let frame = document.getElementById("frame")
+			frame.setAttribute("src", cover_path)
+		}
+	});
+});
+
+	</script>
+</body>
+</html>

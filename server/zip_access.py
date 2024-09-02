@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 
 import os
+import sys
+sys.path[0] = os.getcwd()
+
 import re
 import time
 import json
@@ -76,8 +79,8 @@ class zip_access_handler(FcgiHandler):
 		if err_str:
 			self["stdout"].write(bytes(err_str, "utf-8"))
 
-	def send_status_501(self):
-		self["stdout"].write(b"Content-Type: text/plain; charset=UTF-8\r\nStatus: 501 Not Implemented\r\n\r\n501 Not Implemented\r\n")
+	def send_status_405(self):
+		self["stdout"].write(b"Content-Type: text/plain; charset=UTF-8\r\nStatus: 405 Method Not Allowed\r\n\r\n405 Method Not Allowed\r\n")
 
 	def send_status_416(self, file_size):
 		self["stdout"].write(b"Content-Type: text/plain; charset=UTF-8\r\nStatus: 416 Range Not Satisfiable\r\n")
@@ -174,7 +177,7 @@ class zip_access_handler(FcgiHandler):
 		try:
 			req_method = self.environ.get("REQUEST_METHOD")
 			if req_method not in ("GET", "HEAD"):
-				self.send_status_501()
+				self.send_status_405()
 				return
 
 			www_root = self.environ.get("DOCUMENT_ROOT")

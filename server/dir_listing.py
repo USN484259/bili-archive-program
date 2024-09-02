@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 
 import os
+import sys
+sys.path[0] = os.getcwd()
+
 import json
 from urllib.parse import parse_qs
 from fcgi_server import FcgiThreadingServer
@@ -19,12 +22,13 @@ def dir_listing(path):
 					record["type"] = "dir"
 				elif entry.is_file():
 					record["type"] = "file"
+				else:
+					continue
 
 				stat = entry.stat()
-
 				record["size"] = stat.st_size
 				record["mtime"] = int(stat.st_mtime * 1000)
-			except:
+			except Exception:
 				pass
 			result.append(record)
 
@@ -41,7 +45,7 @@ class dir_listing_handler(FcgiHandler):
 
 			self["stdout"].write(b"Content-type: text/json\r\nStatus: 200 OK\r\n\r\n")
 			self["stdout"].write(bytes(json.dumps(data, indent = '\t', ensure_ascii = False), "utf-8"))
-		except:
+		except Exception:
 			self["stdout"].write(b"Content-type: text/plain\r\nStatus: 404 Not Found\r\n\r\n404 Not Found\r\n")
 
 

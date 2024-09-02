@@ -34,6 +34,7 @@ DEFAULT_NAME_MAP = {
 
 logger = logging.getLogger("bili_arch.core")
 unit_pattern = re.compile(r"(\d+)([kKmMgG][Ii]?)?[Bb]?")
+bv_pattern = re.compile(r"(BV\w+)")
 
 default_names = collections.namedtuple("DefaultName", DEFAULT_NAME_MAP.keys())(**DEFAULT_NAME_MAP)
 
