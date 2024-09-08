@@ -18,7 +18,38 @@
 		<tbody>
 		</tbody>
 	</table>
+	<style>
+a {
+	padding: 4px;
+}
+span {
+	padding: 10px;
+}
+table {
+	border-collapse: collapse;
+}
+thead {
+	border: 1px solid;
+}
+th, td {
+	padding: 10px;
+}
 
+thead th:nth-child(1) {
+	width: 50%;
+}
+thead th:nth-child(4) {
+	width: 20%;
+}
+
+tbody tr:nth-child(odd) {
+	background-color: #cccccc;
+}
+
+tbody tr:nth-child(even) {
+	background-color: #eeeeee;
+}
+	</style>
 	<script>
 
 function size_postfix(size) {
@@ -141,37 +172,5 @@ addEventListener("DOMContentLoaded", () => {
 	});
 });
 	</script>
-	<style>
-a {
-	padding: 4px;
-}
-span {
-	padding: 10px;
-}
-table {
-	border-collapse: collapse;
-}
-thead {
-	border: 1px solid;
-}
-th, td {
-	padding: 10px;
-}
-
-thead th:nth-child(1) {
-	width: 50%;
-}
-thead th:nth-child(4) {
-	width: 20%;
-}
-
-tbody tr:nth-child(odd) {
-	background-color: #cccccc;
-}
-
-tbody tr:nth-child(even) {
-	background-color: #eeeeee;
-}
-	</style>
 </body>
 </html>

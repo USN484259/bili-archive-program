@@ -6,7 +6,7 @@
 <body>
 	<h1 id="title"><a href="/cache/index.html">Cached Videos</a></h1>
 
-	<form id="fetch_form" method="POST" action="/video_cache">
+	<form id="fetch_form" method="POST" action="/fcgi/video_cache">
 		<label for="fetch_bv">Cache new video </label>
 		<input name="bvid" id="fetch_bv" autofocus />
 	</form>
@@ -24,12 +24,52 @@
 		<tbody>
 		</tbody>
 	</table>
+	<style>
+a {
+	padding: 4px;
+}
+span {
+	padding: 10px;
+}
+table {
+	width: 100%;
+	border-collapse: collapse;
+}
+thead {
+	border: 1px solid;
+}
+th, td {
+	padding: 10px;
+}
 
+thead th:nth-child(1) {
+	width: 40%;
+}
+thead th:nth-child(2) {
+	width: min(100px, 10%);
+}
+thead th:nth-child(n+3) {
+	width: max(15%, 100px);
+}
+thead th:last-child {
+	width: min(100px, 10%);
+}
+
+tbody tr:nth-child(odd) {
+	background-color: #cccccc;
+}
+
+tbody tr:nth-child(even) {
+	background-color: #eeeeee;
+}
+	</style>
 	<script>
 
-const cache_url = document.forms["fetch_form"].action
+const cache_api = document.forms["fetch_form"].action
+const cache_root = "/cache/"
 const player_url = "/video_page.html?path=/cache/";
 let localtime = new Intl.DateTimeFormat(undefined, {dateStyle: "medium", timeStyle: "medium"})
+
 
 function append_time(tr_elem, item, key) {
 	let td_elem = document.createElement("td")
@@ -40,39 +80,52 @@ function append_time(tr_elem, item, key) {
 	tr_elem.appendChild(td_elem)
 }
 
+
 function build_tasklist() {
-	fetch(cache_url).then((resp) => resp.json()).then((info_table) => {
-
-		let table_elem = document.getElementById("tasklist")
-		let tbody_elem = document.createElement("tbody")
+	fetch(cache_api).then((resp) => resp.json()).then((info_table) => {
 		console.log(info_table)
-		for (let item of info_table.queue.concat(info_table.record.reverse())) {
-			let tr_elem = document.createElement("tr")
+		let task_list = info_table.queue.concat(info_table.record.reverse())
+		Promise.all(
+			task_list.map(
+				(task) => fetch(cache_root + task.bvid + "/info.json").then((resp) => resp.json()).catch((err) => {})
+			)
+		).then((info_list) => {
+			console.log(info_list)
+			let table_elem = document.getElementById("tasklist")
+			let tbody_elem = document.createElement("tbody")
+			for (let i = 0; i < task_list.length; i++) {
+				let task = task_list[i]
+				let info = info_list[i]
+				let tr_elem = document.createElement("tr")
 
-			// bvid
-			let bvid_elem = document.createElement("td")
-			let a_elem = document.createElement("a")
-			let bvid = item.bvid
-			let url = player_url + bvid
-			a_elem.setAttribute("href", url)
-			a_elem.append(bvid)
-			bvid_elem.append(a_elem)
-			tr_elem.appendChild(bvid_elem)
+				// bvid
+				let bvid_elem = document.createElement("td")
+				let a_elem = document.createElement("a")
+				let bvid = task.bvid
+				let url = player_url + bvid
+				a_elem.setAttribute("href", url)
+				try {
+					bvid = info.title
+				} catch (err) {}
+				a_elem.append(bvid)
+				bvid_elem.append(a_elem)
+				tr_elem.appendChild(bvid_elem)
 
-			// status
-			let stat_elem = document.createElement("td")
-			stat_elem.append(item.status)
-			tr_elem.appendChild(stat_elem)
+				// status
+				let stat_elem = document.createElement("td")
+				stat_elem.append(task.status)
+				tr_elem.appendChild(stat_elem)
 
-			append_time(tr_elem, item, "create_time")
-			append_time(tr_elem, item, "start_time")
-			append_time(tr_elem, item, "stop_time")
+				append_time(tr_elem, task, "create_time")
+				append_time(tr_elem, task, "start_time")
+				append_time(tr_elem, task, "stop_time")
 
-			tbody_elem.append(tr_elem)
-		}
+				tbody_elem.append(tr_elem)
+			}
 
-		let old_tbody = table_elem.getElementsByTagName("tbody")[0]
-		table_elem.replaceChild(tbody_elem, old_tbody)
+			let old_tbody = table_elem.getElementsByTagName("tbody")[0]
+			table_elem.replaceChild(tbody_elem, old_tbody)
+		});
 	});
 }
 
@@ -92,37 +145,5 @@ addEventListener("DOMContentLoaded", () => {
 	setInterval(build_tasklist, 10 * 1000);
 });
 	</script>
-	<style>
-a {
-	padding: 4px;
-}
-span {
-	padding: 10px;
-}
-table {
-	border-collapse: collapse;
-}
-thead {
-	border: 1px solid;
-}
-th, td {
-	padding: 10px;
-}
-
-thead th:nth-child(1) {
-	width: 15%;
-}
-thead th:nth-child(2) {
-	width: 15%;
-}
-
-tbody tr:nth-child(odd) {
-	background-color: #cccccc;
-}
-
-tbody tr:nth-child(even) {
-	background-color: #eeeeee;
-}
-	</style>
 </body>
 </html>

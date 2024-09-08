@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8"/>
+</head>
+<body>
+	<h1 id="title"></h1>
+	<table id="live_status">
+		<thead>
+			<tr>
+				<th>name</th>
+				<th>title</th>
+				<th>live-time</th>
+			</tr>
+		</thead>
+		<tbody>
+		</tbody>
+	</table>
+	<style>
+a {
+	padding: 4px;
+}
+span {
+	padding: 10px;
+}
+table {
+	border-collapse: collapse;
+}
+thead {
+	border: 1px solid;
+}
+th, td {
+	padding: 10px;
+}
+
+thead th:nth-child(2) {
+	width: 50%;
+}
+thead th:nth-child(3) {
+	width: 20%;
+}
+
+tbody tr:nth-child(odd) {
+	background-color: #cccccc;
+}
+
+tbody tr:nth-child(even) {
+	background-color: #eeeeee;
+}
+
+	</style>
+	<script>
+const live_status_api = "/fcgi/live_status"
+
+function live_time_str(start_time) {
+	let time_sec = Math.floor(Date.now() / 1000 - start_time)
+	let result = ""
+	if (time_sec < 0)
+		return result
+
+	if (time_sec >= 3600) {
+		result += Math.floor(time_sec / 3600) + ':'
+		time_sec %= 3600
+	}
+
+	let min = Math.floor(time_sec / 60)
+	let sec = time_sec % 60
+	result += min.toLocaleString(undefined, {minimumIntegerDigits: 2})
+		+ ':' + sec.toLocaleString(undefined, {minimumIntegerDigits: 2})
+
+	return result
+}
+
+function build_live_list() {
+	fetch(live_status_api).then((resp) => resp.json()).then((live_status) => {
+		console.log(live_status)
+
+		let table_elem = document.getElementById("live_status")
+		let tbody_elem = document.createElement("tbody")
+		let active_count = 0
+		for (let [uid, status] of Object.entries(live_status)) {
+			if (status.live_status != 1)
+				continue
+
+			active_count += 1
+			let tr_elem = document.createElement("tr")
+
+			// user
+			let user_elem = document.createElement("td")
+			let user_a_elem = document.createElement("a")
+			let user_url = "https://space.bilibili.com/" + uid
+			user_a_elem.setAttribute("href", user_url)
+			user_a_elem.setAttribute("target", "_blank")
+			user_a_elem.append(status.uname)
+			user_elem.append(user_a_elem)
+
+			// title
+			let title_elem = document.createElement("td")
+			let title_a_elem = document.createElement("a")
+			let live_url = "https://live.bilibili.com/" + status.room_id
+			title_a_elem.setAttribute("href", live_url)
+			title_a_elem.setAttribute("target", "_blank")
+			title_a_elem.append(status.title)
+			title_elem.append(title_a_elem)
+
+			// live_time
+			let live_time_elem = document.createElement("td")
+			live_time_elem.append(live_time_str(status.live_time))
+
+			tr_elem.append(user_elem, title_elem, live_time_elem)
+			tbody_elem.append(tr_elem)
+		}
+		let old_tbody = table_elem.getElementsByTagName("tbody")[0]
+		table_elem.replaceChild(tbody_elem, old_tbody)
+
+		let title_elem = document.getElementById("title")
+		title_elem.replaceChildren("Active live rooms: " + active_count)
+	});
+}
+
+addEventListener("DOMContentLoaded", () => {
+	build_live_list();
+	setInterval(build_live_list, 30 * 1000);
+});
+
+	</script>
+</body>
+</html>

@@ -21,10 +21,9 @@ body {
 
 #frame {
 	width: 100%;
-	height: 80vh;
-	max-width: 100%;
+	height: 75vw;
+	max-height: 80vh;
 	object-fit: contain;
-
 }
 
 #title {
@@ -33,12 +32,17 @@ body {
 
 #desc {
 	width: 100%;
-	min-height: 20vh;
+	height: 20vh;
+	min-height: 100px;
 	resize: vertical;
 }
 
 #info {
 	width: 90%;
+}
+
+#author {
+	font-weight: bold;
 }
 
 #uptime {
@@ -67,10 +71,17 @@ li:nth-child(even) {
 
 function time_str(time_sec) {
 	let result = ""
-	let hour = Math.floor(time_sec / 3600)
-	let min = Math.floor((time_sec % 3600) / 60)
+	if (time_sec >= 3600) {
+		result += Math.floor(time_sec / 3600) + ':'
+		time_sec %= 3600
+	}
+
+	let min = Math.floor(time_sec / 60)
 	let sec = time_sec % 60
-	return ((hour > 0) ? (toString(hour) + ':') : "") + min.toLocaleString(undefined, {minimumIntegerDigits: 2}) + ':' + sec.toLocaleString(undefined, {minimumIntegerDigits: 2})
+	result += min.toLocaleString(undefined, {minimumIntegerDigits: 2})
+		+ ':' + sec.toLocaleString(undefined, {minimumIntegerDigits: 2})
+
+	return result
 }
 
 function load_video() {
@@ -95,6 +106,12 @@ function load_video() {
 }
 
 window.addEventListener("hashchange", load_video);
+
+function on_link_part(ev) {
+	ev.preventDefault();
+	console.log(ev.currentTarget.href)
+	location.replace(ev.currentTarget.hash)
+}
 
 addEventListener("DOMContentLoaded", () => {
 	const path_pattern = new RegExp("[&?]path=(.+)");
@@ -142,6 +159,8 @@ addEventListener("DOMContentLoaded", () => {
 			li_elem.appendChild(part_elem)
 			li_elem.appendChild(cid_elem)
 			list_elem.appendChild(li_elem)
+
+			part_elem.addEventListener("click", on_link_part)
 		}
 
 		if (!load_video()) {
