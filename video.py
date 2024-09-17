@@ -116,7 +116,7 @@ def find_best_url_dash(info, *, prefer, reject):
 			logger.warning("no %s", name)
 			result[dummy_name] = []
 		else:
-			raise Exception("no url info for %s", name)
+			raise RuntimeError("no url info for %s", name)
 
 	fill_url("video", ".m4v")
 	fill_url("audio", ".m4a", core.default_names.noaudio)
@@ -154,7 +154,7 @@ async def fetch_info(sess, bv, stall = None):
 				logger.warning(msg)
 				info["videos"] = actual_count
 			else:
-				raise Exception(msg)
+				raise RuntimeError(msg)
 
 	# skip subtitle for now
 	return info
@@ -178,7 +178,7 @@ async def fetch_part(sess, bvid, cid, path, force, /, stall = None, *, prefer = 
 		logger.debug("durl format")
 		url_info = find_best_url_durl(play_info.get("durl"), prefer = prefer, reject = reject)
 	else:
-		raise Exception("unknown URL format")
+		raise RuntimeError("unknown URL format")
 
 	exception = None
 	for name, url_list in url_info.items():
@@ -258,7 +258,7 @@ async def do_fix(sess, bv, path, stall = None, **kwargs):
 			stat = verify_bv(bv_root)
 			for k, v in stat.items():
 				if not v:
-					raise Exception("failed to fix " + bv)
+					raise RuntimeError("failed to fix " + bv)
 
 		if not stat.get("cover", False):
 			info = info or await fetch_info(sess, bv, stall)

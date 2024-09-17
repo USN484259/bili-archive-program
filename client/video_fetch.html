@@ -84,7 +84,7 @@ function append_time(tr_elem, item, key) {
 function build_tasklist() {
 	fetch(cache_api).then((resp) => resp.json()).then((info_table) => {
 		console.log(info_table)
-		let task_list = info_table.queue.concat(info_table.record.reverse())
+		let task_list = info_table.record.concat(info_table.queue).reverse()
 		Promise.all(
 			task_list.map(
 				(task) => fetch(cache_root + task.bvid + "/info.json").then((resp) => resp.json()).catch((err) => {})

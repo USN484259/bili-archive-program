@@ -73,17 +73,17 @@ function size_postfix(size) {
 }
 
 const path_pattern = new RegExp("^(.*/)[^/]+$")
+const parent_pattern = new RegExp("^(.*/)([^/]+)/$")
+
 let localtime = new Intl.DateTimeFormat(undefined, {dateStyle: "medium", timeStyle: "medium"})
 
 addEventListener("DOMContentLoaded", () => {
 	let path = document.location.pathname.split(path_pattern)[1]
-	console.log(path)
 	let parent_path = null
 	if (path != "/") {
-		let parent_match = path.split(path_pattern)
-		parent_path = parent_match[1]
+		parent_path = path.split(parent_pattern)[1]
 	}
-
+	console.log(path, parent_path)
 	let title_elem = document.getElementById("title")
 	title_elem.append("Index of " + decodeURIComponent(path))
 

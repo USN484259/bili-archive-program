@@ -44,11 +44,11 @@ def exec_download(video_root, bvid, arg_list):
 # classes
 
 class BVDownloader:
-	def __init__(self, video_root, /, args = (), *, max_records = 64):
+	def __init__(self, video_root, /, args = (), *, max_queue = 0x10, max_records = 0x400):
 		self.video_root = video_root
 		self.args = args
 		self.record = deque([], max_records)
-		self.queue = deque()
+		self.queue = deque([], max_queue)
 		self.task = None
 
 	def download(self, bvid):
@@ -85,6 +85,9 @@ class BVDownloader:
 
 
 	def schedule(self, bvid):
+		if len(self.queue) >= self.queue.maxlen:
+			raise RuntimeError("queue full")
+
 		self.queue.append({
 			"bvid": bvid,
 			"status": "waiting",

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import os
+import sys
 import json
 import signal
 import asyncio
@@ -14,17 +15,18 @@ import live_rec
 
 # constants
 
-MONITOR_QUERY_URL = "https://api.live.bilibili.com/room/v1/Room/get_status_info_by_uids"
+LIVE_STATUS_URL = "https://api.live.bilibili.com/room/v1/Room/get_status_info_by_uids"
 
 # static objects
 
 logger = logging.getLogger("bili_arch.monitor")
 multiprocessing = multiprocessing.get_context("fork")
+scheduled_restart = False
 
 # helper functions
 
-async def get_live_info(sess, uid_list):
-	info_map = await network.request(sess, "POST", MONITOR_QUERY_URL, json = {"uids": uid_list})
+async def get_live_status(sess, uid_list):
+	info_map = await network.request(sess, "POST", LIVE_STATUS_URL, json = {"uids": uid_list})
 	return info_map
 
 
@@ -38,6 +40,25 @@ def exec_record(*args):
 	signal.signal(signal.SIGUSR1, signal.SIG_IGN)
 	asyncio.run(record_main(*args))
 	os._exit(0)
+
+
+def exec_restart():
+	logger.info("restarting %s", sys.argv[0])
+	exec_path = sys.executable
+	if exec_path:
+		logger.info("python-path %s", exec_path)
+	else:
+		import shutil
+		exec_path = shutil.which("python3")
+		logger.warning("guessing python-path %s", exec_path)
+
+	if sys.hexversion >= 0x030A0000:
+		argv = sys.orig_argv
+	else:
+		argv = ["python"] + sys.argv
+
+	logger.debug(argv)
+	os.execv(exec_path, argv)
 
 
 async def task_cleanup(record):
@@ -109,7 +130,7 @@ async def monitor_check(sess, config):
 		uid_list = list(config.records.keys())
 
 	logger.info("checking %d live rooms", len(uid_list))
-	info_map = await get_live_info(sess, uid_list)
+	info_map = await get_live_status(sess, uid_list)
 	active_rooms = []
 	remove_list = {}
 
@@ -162,19 +183,28 @@ async def monitor_check(sess, config):
 			assert(config.records[uid]["task"] is None)
 			del config.records[uid]
 
+		return len(active_rooms)
+
 
 async def monitor_task(config, interval):
+	global scheduled_restart
 	async with network.session() as sess:
 		while True:
 			try:
-				await monitor_check(sess, config)
+				active_count = await monitor_check(sess, config)
 
-			except Exception as e:
+			except Exception:
 				logger.exception("exception on monitor_check")
 
 			logger.info("sleep %d sec", interval)
 			await asyncio.sleep(interval)
 
+			if scheduled_restart and active_count == 0:
+				try:
+					exec_restart()
+				except Exception:
+					scheduled_restart = False
+					logger.exception("exception on restart")
 
 
 
@@ -184,9 +214,14 @@ async def main(args):
 	config = Config(args)
 	await config.update()
 
-	def sig_handler(signum, frame):
+	def sig_reload(signum, frame):
 		logger.info("reloading config")
 		asyncio.create_task(config.update())
+
+	def sig_restart(signum, frame):
+		global scheduled_restart
+		logger.info("restart scheduled")
+		scheduled_restart = True
 
 	async def on_connected(reader, writer):
 		logger.debug("reading live status")
@@ -197,7 +232,8 @@ async def main(args):
 		writer.close()
 		await writer.wait_closed()
 
-	signal.signal(signal.SIGUSR1, sig_handler)
+	signal.signal(signal.SIGUSR1, sig_reload)
+	signal.signal(signal.SIGUSR2, sig_restart)
 
 	if args.socket:
 		import socket

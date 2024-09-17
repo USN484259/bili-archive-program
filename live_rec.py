@@ -137,7 +137,7 @@ async def record_flv(sess, info, name_prefix):
 			if connected:
 				raise
 	else:
-		raise Exception("record_flv: no valid URL")
+		raise RuntimeError("record_flv: no valid URL")
 
 
 async def record_hls(sess, info, name_prefix):

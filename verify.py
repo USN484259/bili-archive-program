@@ -84,7 +84,7 @@ def verify_media(path, part_duration, duration_tolerance):
 
 def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = None):
 	if scan_files and not ffprobe_bin:
-		raise Exception("ffprobe binary not found")
+		raise RuntimeError("ffprobe binary not found")
 
 	result = {
 		"info" : False,
@@ -125,7 +125,7 @@ def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = 
 		part_list = None
 		if "interactive" in bv_info:
 		# 	if not is_interactive(bv_info):
-		# 		raise Exception("conflicting interactive video status")
+		# 		raise RuntimeError("conflicting interactive video status")
 
 			part_list = bv_info.get("interactive").get("nodes")
 
@@ -135,7 +135,7 @@ def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = 
 		else:
 			part_list = bv_info.get("pages")
 			if bv_info.get("videos") != len(part_list):
-				raise Exception("part count mismatch")
+				raise RuntimeError("part count mismatch")
 
 		subtitle_table = None
 		if 'S' not in ignore:

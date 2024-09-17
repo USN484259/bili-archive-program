@@ -43,7 +43,7 @@ async def check_credential(sess):
 	logger.debug(result)
 	code = result.get("code")
 	if code != 0:
-		raise Exception("bad credential %d" % code)
+		raise RuntimeError("bad credential %d" % code)
 
 
 async def request(sess, method, url, **kwargs):
@@ -58,7 +58,7 @@ async def request(sess, method, url, **kwargs):
 
 	msg = result.get("msg") or result.get("message", "")
 	logger.error("response code %d, msg %s", code, msg)
-	raise Exception(msg)
+	raise RuntimeError(msg)
 
 
 async def fetch(sess, url, path, **kwargs):
@@ -101,7 +101,7 @@ async def fetch(sess, url, path, **kwargs):
 			if length and file_length != length:
 				logger.warning("%s size mismatch, expect %d got %d", path, length, file_length)
 				if length > file_length:
-					raise Exception("unexpected EOF: %s", path)
+					raise RuntimeError("unexpected EOF: %s", path)
 
 	return file_length
 
