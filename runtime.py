@@ -113,8 +113,9 @@ def parse_args(std_args, extra_args = (), *, arg_list = None):
 
 
 class Stall:
-	def __init__(self, stall_time = default_stall_time):
-		self.stall_time = stall_time
+	def __init__(self, stall_time = None):
+		global default_stall_time
+		self.stall_time = stall_time or default_stall_time
 		self.last_time = 0
 		self.mutex = asyncio.Lock()
 

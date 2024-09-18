@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 
+import re
+import sys
 import time
 import httpx
 import asyncio
 import logging
+import hashlib
+from urllib.parse import urlencode
+
 
 import core
 import runtime
@@ -17,11 +22,70 @@ USER_AGENT = {
 
 BILI_DOMAIN = ".bilibili.com"
 CHECK_CREDENTIAL_URL = "https://api.bilibili.com/x/web-interface/nav"
+WBI_KEY_URL = "https://api.bilibili.com/x/web-interface/nav"
 
+WBI_MIXIN_KEY_ENC_TAB = [
+46, 47, 18,  2, 53,  8, 23, 32,
+15, 50, 10, 31, 58,  3, 45, 35,
+27, 43,  5, 49, 33,  9, 42, 19,
+29, 28, 14, 39, 12, 38, 41, 13,
+37, 48,  7, 16, 24, 55, 40, 61,
+26, 17,  0,  1, 60, 51, 30,  4,
+22, 25, 54, 21, 56, 59,  6, 63,
+57, 62, 11, 36, 20, 34, 44, 52
+]
 
 # static objects
 
 logger = logging.getLogger("bili_arch.network")
+wbi_pattern = re.compile(r"^.+/([^/.]+)\.[^/.]+$")
+wbi_cached_key = None
+
+## wbi sign
+# https://github.com/SocialSisterYi/bilibili-API-collect/blob/master/docs/misc/sign/wbi.md
+
+def md5sum(*params):
+	hash_args = {}
+	if sys.hexversion >= 0x03090000:
+		m = hashlib.md5(usedforsecurity = False)
+	else:
+		m = hashlib.md5()
+
+	for s in params:
+		m.update(s.encode())
+	return m.hexdigest()
+
+
+async def get_wbi_key(sess):
+	response = await sess.request("GET", WBI_KEY_URL)
+	response.raise_for_status()
+	result = response.json()
+
+	wbi_info = result.get("data").get("wbi_img")
+	img_key = wbi_pattern.fullmatch(wbi_info.get("img_url")).group(1)
+	sub_key = wbi_pattern.fullmatch(wbi_info.get("sub_url")).group(1)
+
+	logger.debug("img_key %s, sub_key %s", img_key, sub_key)
+	key_str = img_key + sub_key
+	wbi_key = "".join((key_str[k] for k in WBI_MIXIN_KEY_ENC_TAB))
+	logger.debug("wbi_key %s", wbi_key)
+	return wbi_key[:32]
+
+
+def wbi_sign_request(wbi_key, kwargs):
+	params = kwargs.get("params")
+	if not params:
+		raise RuntimeError("wbi_sign missing params")
+
+	params = params.copy()
+	params["wts"] = int(time.time())
+	params = dict(sorted(params.items()))
+	query = urlencode(params)
+	logger.debug(query)
+	params["w_rid"] = md5sum(query, wbi_key)
+	result_args = {k: kwargs[k] for k in kwargs if k != "params"}
+	result_args["params"] = dict(sorted(params.items()))
+	return result_args
 
 
 ## requests
@@ -46,19 +110,32 @@ async def check_credential(sess):
 		raise RuntimeError("bad credential %d" % code)
 
 
-async def request(sess, method, url, **kwargs):
-	# TODO wbi sign
-	response = await sess.request(method, url, **kwargs)
-	response.raise_for_status()
-	result = response.json()
+async def request(sess, method, url, /, wbi_sign = False, **kwargs):
+	global wbi_cached_key
+	retry = True
+	while True:
+		if wbi_sign:
+			if not wbi_cached_key:
+				wbi_cached_key = await get_wbi_key(sess)
+			signed_args = wbi_sign_request(wbi_cached_key, kwargs)
+		else:
+			signed_args = kwargs
 
-	code = result.get("code", -32768)
-	if code == 0:
-		return result.get("data")
+		response = await sess.request(method, url, **signed_args)
+		response.raise_for_status()
+		result = response.json()
 
-	msg = result.get("msg") or result.get("message", "")
-	logger.error("response code %d, msg %s", code, msg)
-	raise RuntimeError(msg)
+		code = result.get("code", -32768)
+		if wbi_sign and retry and "v_voucher" in result.get("data", {}):
+			wbi_cached_key = await get_wbi_key(sess)
+			retry = False
+			continue
+		elif code == 0:
+			return result.get("data")
+
+		msg = result.get("msg") or result.get("message", "")
+		logger.error("response code %d, msg %s", code, msg)
+		raise RuntimeError(msg)
 
 
 async def fetch(sess, url, path, **kwargs):
@@ -74,7 +151,6 @@ async def fetch(sess, url, path, **kwargs):
 			logger.debug("content length %d", length)
 		else:
 			logger.warning("missing content-length")
-
 
 		with core.staged_file(path, "wb", **kwargs) as f:
 			last_timestamp = None
