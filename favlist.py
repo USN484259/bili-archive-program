@@ -66,7 +66,11 @@ async def fetch_favlist(sess, mid, stall = None):
 			if info.get("id") != favlist_info.get("id") or info.get("media_count") != favlist_info.get("media_count"):
 				raise RuntimeError("favlist %d: page %d info mismatch" % (mid, page_index))
 
-		favlist += favlist_page.get("medias")
+		medias = favlist_page.get("medias")
+		if not medias:
+			logger.warning("empty favlist page %d, stop here", page_index)
+			break
+		favlist += medias
 		logger.debug("favlist %d, %d/%d", mid, len(favlist), favlist_info.get("media_count"))
 
 		if favlist_page.get("has_more"):
@@ -75,7 +79,7 @@ async def fetch_favlist(sess, mid, stall = None):
 			break
 
 	if favlist_info.get("media_count") != len(favlist):
-		raise RuntimeError("favlist %d: size mismatch %d/%d" %(mid, len(favlist), favlist_info.get("media_count")))
+		logger.error("favlist %d: size mismatch %d/%d", mid, len(favlist), favlist_info.get("media_count"))
 
 	return {"info": favlist_info, "medias": favlist}
 

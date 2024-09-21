@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 
+import os
 import re
 import sys
 import time
 import httpx
+import shutil
 import asyncio
 import logging
 import hashlib
 from urllib.parse import urlencode
-
 
 import core
 import runtime
@@ -91,7 +92,8 @@ def wbi_sign_request(wbi_key, kwargs):
 ## requests
 
 def session(credential = None):
-	credential = credential or runtime.credential
+	if credential is None:
+		credential = runtime.credential
 	timeout = httpx.Timeout(5, connect = runtime.http_timeout)
 	cookies = httpx.Cookies()
 	for k, v in credential.items():
@@ -181,3 +183,76 @@ async def fetch(sess, url, path, **kwargs):
 
 	return file_length
 
+
+class image_fetcher:
+	def __init__(self, stall_time = 2):
+		self.sess = None
+		self.task = None
+		self.quit = False
+		self.queue = asyncio.Queue()
+		self.stall = runtime.Stall(stall_time)
+		self.cache_map = {}
+
+	async def __aenter__(self):
+		await self.start()
+		return self
+
+	async def __aexit__(self, exc_type, exc_value, traceback):
+		if (exc_type is None and exc_value is None):
+			await self.join()
+		await self.close()
+
+	async def start(self):
+		assert(self.sess is None)
+		self.sess = session(credential = {})
+		self.task = asyncio.create_task(self.worker())
+		self.task.add_done_callback(asyncio.Task.result)
+
+	async def close(self):
+		if self.task is not None:
+			self.quit = True
+			await self.queue.put((None, None, None))
+			await self.task
+			self.task = None
+
+		if self.sess:
+			await self.sess.aclose()
+			self.sess = None
+
+	async def join(self):
+		if not self.quit:
+			await self.queue.join()
+
+	async def schedule(self, path, name, url):
+		await self.queue.put((path, name, url))
+
+	async def worker(self):
+		while not self.quit:
+			if self.queue.empty():
+				logger.info("image_fetcher standby")
+
+			path, name, url = await self.queue.get()
+			if (path and name and url):
+				file_name = os.path.join(path, name)
+				if os.path.isfile(file_name):
+					logger.debug("skip existing image %s", file_name)
+				else:
+					cached_file = self.cache_map.get(name)
+					try:
+						if cached_file:
+							logger.debug("reusing image %s", cached_file)
+							shutil.copyfile(cached_file, file_name)
+						else:
+							logger.info("fetching image %s", name)
+							await self.stall()
+							await fetch(self.sess, url, file_name)
+							self.cache_map[name] = file_name
+					except Exception:
+						if cached_file:
+							logger.exception("failed to copy file %s to %s", cached_file, path)
+						else:
+							logger.exception("failed to fetch image %s", name)
+
+			self.queue.task_done()
+
+		logger.info("image_fetcher exited")

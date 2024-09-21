@@ -18,6 +18,7 @@ root_dir = "."
 credential = {}
 
 logger = logging.getLogger("bili_arch.runtime")
+img_pattern = re.compile(r"^http.?://[^/]+hdslb[.]com/.+/([^/.]+\.[^/.]+)$")
 
 
 standard_args = {
@@ -91,6 +92,10 @@ def parse_args(std_args, extra_args = (), *, arg_list = None):
 		handler.setFormatter(logging.Formatter(core.LOG_FORMAT))
 		root_logger.addHandler(handler)
 
+	filter_func = lambda rec: rec.levelno > log_level or rec.name.startswith("bili_arch")
+	for handler in root_logger.handlers:
+		handler.addFilter(filter_func)
+
 	if getattr(args, "stall", None):
 		default_stall_time = float(args.stall)
 
@@ -150,3 +155,20 @@ def report(key, status, *args):
 	print(key[0].upper(), status, *args, flush = True)
 
 
+def find_images(table):
+	if type(table) is dict:
+		return find_images(table.values())
+
+	result = {}
+	for v in table:
+		if type(v) is dict:
+			result.update(find_images(v.values()))
+		elif type(v) is list:
+			result.update(find_images(v))
+		elif type(v) is str:
+			img_match = img_pattern.fullmatch(v)
+			if img_match:
+				key = img_match.group(1)
+				result[key] = v
+
+	return result

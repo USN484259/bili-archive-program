@@ -10,7 +10,7 @@ from collections import ChainMap
 import core
 import runtime
 import network
-from video_collection import fetch_user_collections, gather_resources_from_collectons
+from video_collection import fetch_user_collections, gather_bvid_from_collectons
 
 # constants
 
@@ -21,7 +21,6 @@ USER_FULL_INFO_URL = "https://api.bilibili.com/x/space/wbi/acc/info"
 # static objects
 
 logger = logging.getLogger("bili_arch.user")
-img_pattern = re.compile(r"^.+/([^/.]+\.[^/.]+)$")
 
 # helper functions
 
@@ -38,30 +37,6 @@ async def get_user_basic_info(sess, uid_list):
 async def get_user_brief_info(sess, uid_list):
 	info = await network.request(sess, "GET", USER_BRIEF_INFO_URL, params = {"uids": ",".join(uid_list)})
 	return {str(u["mid"]): u for u in info}
-
-
-async def fetch_image(sess, url, img_root, stall = None):
-	try:
-		img_match = img_pattern.fullmatch(url)
-		if not img_match:
-			return
-		img_name = img_match.group(1)
-		logger.debug("fetching image %s", img_name)
-		img_path = os.path.join(img_root, img_name)
-		if os.path.isfile(img_path):
-			return
-		stall and await stall()
-		await network.fetch(sess, url, img_path)
-	except Exception:
-		logger.exception("failed to fetch image")
-
-
-async def recursive_save_images(sess, path, table, stall = None):
-	for v in table.values():
-		if type(v) is dict:
-			await recursive_save_images(sess, path, v, stall)
-		elif type(v) is str:
-			await fetch_image(sess, v, path, stall)
 
 
 # methods
@@ -82,10 +57,9 @@ async def fetch_users(sess, uid_list, stall = None):
 			raise
 
 	if runtime.credential:
-		logger.info("fetching full user info")
 		for uid in uid_list:
 			try:
-				logger.debug("fetching user %s", uid)
+				logger.info("fetching full user info %s", uid)
 				await stall()
 				info = await get_user_full_info(sess, uid)
 				orig_info = user_map.get(uid)
@@ -99,38 +73,52 @@ async def fetch_users(sess, uid_list, stall = None):
 	return user_map
 
 
+async def fetch_images(img_fetch, info, path):
+	img_table = runtime.find_images(info)
+	logger.info("fetching %d images", len(img_table))
+	for name, url in img_table.items():
+		await img_fetch.schedule(path, name, url)
+
+
 # entrance
 
 async def main(args):
 	if args.download:
 		import video
 
-	async with network.session() as sess:
+	async with network.session() as sess, network.image_fetcher() as img_fetch:
 		stall = runtime.Stall()
 		user_root = args.dir or runtime.subdir("user")
 
+		logger.info("fetching %d users", len(args.inputs))
 		user_map = await fetch_users(sess, args.inputs, stall)
 		bv_table = set()
 		fetched_user = 0
 		for uid, info in user_map.items():
 			fetch_status = False
 			try:
-				collection = await fetch_user_collections(sess, uid, stall)
-				info["videos"] = collection
-				bv_t, img_table = gather_resources_from_collectons(collection)
-				bv_table |= bv_t
-
-				# TODO fetch dynamics
 				with core.locked_path(user_root, uid) as uid_path:
+					await fetch_images(img_fetch, info, uid_path)
+
+					logger.info("fetching collections of user %s", uid)
+					collection = await fetch_user_collections(sess, uid, stall)
+					info["videos"] = collection
+
+					await fetch_images(img_fetch, collection, uid_path)
+
+					user_bv = gather_bvid_from_collectons(collection)
+					logger.info("user %s, videos %d", uid, len(user_bv))
+					bv_table |= user_bv
+
 					info_path = os.path.join(uid_path, "info.json")
+					logger.info("saving user %s", uid)
 					with core.staged_file(info_path, "w", rotate = True) as f:
 						json.dump(info, f, indent = '\t', ensure_ascii = False)
 
-					# TODO save images in seperate task
-					await recursive_save_images(sess, uid_path, info, stall)
-
-					for img_url in img_table:
-						await fetch_image(sess, img_url, uid_path, stall)
+					img_table = runtime.find_images(info)
+					logger.info("user %s, images %d", uid, len(img_table))
+					for name, url in img_table.items():
+						await img_fetch.schedule(uid_path, name, url)
 
 				fetched_user += 1
 				fetch_status = True

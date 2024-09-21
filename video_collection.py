@@ -57,7 +57,7 @@ async def fetch_user_videos(sess, uid, stall = None):
 			if video_info is None:
 				video_info = video_page.get("list").get("tlist")
 				video_count = video_page.get("page").get("count")
-				logger.info("user %s, videos %d", uid, video_count)
+				logger.debug("user %s, videos %d", uid, video_count)
 
 			vlist = video_page.get("list").get("vlist")
 			if not vlist:
@@ -114,7 +114,7 @@ async def fetch_user_collection_list(sess, uid, stall = None):
 		season_list = collections.get("items_lists").get("seasons_list")
 		series_list = collections.get("items_lists").get("series_list")
 
-		logger.info("fetched collection list %d, %d", len(series_list), len(season_list))
+		logger.info("fetched collection list, series %d, seasons %d", len(series_list), len(season_list))
 		return {
 			"seasons_list": [s.get("meta") for s in season_list],
 			"series_list": [s.get("meta") for s in series_list],
@@ -125,7 +125,6 @@ async def fetch_user_collection_list(sess, uid, stall = None):
 
 
 async def fetch_user_collections(sess, uid, stall = None):
-	logger.info("fetching video collections for user %s", uid)
 	result = {
 		"series": [],
 		"seasons": [],
@@ -156,33 +155,23 @@ async def fetch_user_collections(sess, uid, stall = None):
 	return result
 
 
-def gather_resources_from_collectons(collection):
+def gather_bvid_from_collectons(collection):
 	bv_table = set()
-	img_table = set()
 
 	def gather_from_list(l):
 		if not l:
 			return
 		for v in l:
 			bvid = v.get("bvid")
-			img_url = v.get("pic")
 			if bvid:
 				bv_table.add(bvid)
-			if img_url:
-				img_table.add(img_url)
 
 	gather_from_list(collection.get("videos", {}).get("list"))
 
 	for s in collection.get("series", []):
-		img_url = s.get("info", {}).get("cover")
-		if img_url:
-			img_table.add(img_url)
 		gather_from_list(s.get("list"))
 
 	for s in collection.get("seasons", []):
-		img_url = s.get("info", {}).get("cover")
-		if img_url:
-			img_table.add(img_url)
 		gather_from_list(s.get("list"))
 
-	return bv_table, img_table
+	return bv_table
