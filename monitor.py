@@ -30,9 +30,12 @@ async def get_live_status(sess, uid_list):
 	return info_map
 
 
-async def record_main(rid, path):
-	async with network.session() as sess:
-		with core.locked_path(path) as rec_path:
+async def record_main(rid, path, rec_log):
+	with core.locked_path(path) as rec_path:
+		if rec_log:
+			log_path = os.path.join(rec_path, "record.log")
+			runtime.logging_init(runtime.log_level - 10, log_path, no_stderr = True)
+		async with network.session() as sess:
 			await live_rec.record(sess, rid, rec_path)
 
 
@@ -73,11 +76,11 @@ async def task_cleanup(record):
 	return True
 
 
-async def task_start(record, rid, path):
+async def task_start(record, rid, path, rec_log = False):
 	assert(record.get("task") is None)
 	task = multiprocessing.Process(
 		target = exec_record, args = (
-			rid, path
+			rid, path, rec_log
 		), daemon = False)
 	task.start()
 	record["task"] = task
@@ -87,6 +90,7 @@ class Config:
 	def __init__(self, args):
 		self.config_path = args.config
 		self.live_root = args.dir or runtime.subdir("live")
+		self.rec_log = args.rec_log
 		self.records = {}
 		self.lock = asyncio.Lock()
 
@@ -173,7 +177,7 @@ async def monitor_check(sess, config):
 			rec_path = os.path.join(config.live_root, rec_name)
 			logger.info("start recording %s, room %d, %s", name, rid, rec_name)
 
-			await task_start(record, rid, rec_path)
+			await task_start(record, rid, rec_path, config.rec_log)
 			active_rooms.append(name)
 
 		logger.info("active live rooms %d %s", len(active_rooms), " ".join(active_rooms))
@@ -260,6 +264,7 @@ if __name__ == "__main__":
 	args = runtime.parse_args(("network", "auth", "dir", "prefer"), [
 		(("-c", "--config"), {"required": True}),
 		(("-i", "--interval"), {"type" : int, "default" : 30}),
+		(("--rec-log",), {"action": "store_true", "default": False}),
 		(("socket",), {"nargs": '?'}),
 	])
 	asyncio.run(main(args))

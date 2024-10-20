@@ -11,6 +11,7 @@ import core
 
 # static objects
 
+log_level = logging.INFO
 http_timeout = 20
 default_stall_time = 5
 bandwidth_limit = None
@@ -19,7 +20,6 @@ credential = {}
 
 logger = logging.getLogger("bili_arch.runtime")
 img_pattern = re.compile(r"^http.?://[^/]+hdslb[.]com/.+/([^/.]+\.[^/.]+)$")
-
 
 standard_args = {
 	"auth": [
@@ -61,6 +61,29 @@ def load_credential(auth_file):
 
 ## startup & runtime
 
+def logging_init(level, /, log_file = None, *, no_stderr = False):
+	global log_level
+
+	extra_args = {}
+	if no_stderr:
+		if not log_file:
+			raise RuntimeError("missing log_file")
+		extra_args = {"filename": log_file}
+
+	logging.basicConfig(level = level, format = core.LOG_FORMAT, force = True, **extra_args)
+	log_level = level
+	root_logger = logging.getLogger()
+
+	if (not no_stderr) and log_file:
+		handler = logging.FileHandler(log_file, delay = True)
+		handler.setFormatter(logging.Formatter(core.LOG_FORMAT))
+		root_logger.addHandler(handler)
+
+	filter_func = lambda rec: rec.levelno > level or rec.name.startswith("bili_arch")
+	for handler in root_logger.handlers:
+		handler.addFilter(filter_func)
+
+
 def parse_args(std_args, extra_args = (), *, arg_list = None):
 	global http_timeout
 	global default_stall_time
@@ -84,17 +107,7 @@ def parse_args(std_args, extra_args = (), *, arg_list = None):
 	args = parser.parse_args(arg_list)
 
 	log_level = logging.INFO + 10 * (args.quiet - args.verbose)
-	logging.basicConfig(level = log_level, format = core.LOG_FORMAT, force = True)
-	root_logger = logging.getLogger()
-
-	if args.log:
-		handler = logging.FileHandler(args.log, delay = True)
-		handler.setFormatter(logging.Formatter(core.LOG_FORMAT))
-		root_logger.addHandler(handler)
-
-	filter_func = lambda rec: rec.levelno > log_level or rec.name.startswith("bili_arch")
-	for handler in root_logger.handlers:
-		handler.addFilter(filter_func)
+	logging_init(log_level, args.log)
 
 	if getattr(args, "stall", None):
 		default_stall_time = float(args.stall)

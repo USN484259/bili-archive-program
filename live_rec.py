@@ -2,6 +2,7 @@
 
 import os
 import time
+import json
 import asyncio
 import zipfile
 import logging
@@ -189,7 +190,32 @@ async def record_hls(sess, info, name_prefix):
 					m3u.dump(f)
 
 
-async def record(sess, rid, path, *, prefer = None, reject = None):
+async def record_danmaku(rid, path):
+	from live_danmaku import LiveDanmaku
+
+	danmaku_file_name = os.path.join(path, "danmaku.json")
+	logger.info("recording %s danmaku into %s", rid, danmaku_file_name)
+	with core.locked_file(danmaku_file_name, "a") as f:
+		async with LiveDanmaku(rid) as live_danmaku, network.image_fetcher() as fetcher:
+			async for ev_list in live_danmaku:
+				timestamp = int(time.time() * 1000)
+				for ev in ev_list:
+					ev["timestamp"] = timestamp
+					f.write(json.dumps(ev, ensure_ascii = False) + '\n')
+				if ev.get("cmd", "") == "DANMU_MSG":
+					info = ev.get("info")
+					if isinstance(info, list) and len(info):
+						for obj in info[0]:
+							if not isinstance(obj, dict):
+								continue
+							img_name = obj.get("emoticon_unique")
+							img_url = obj.get("url")
+							if img_name and img_url:
+								await fetcher.schedule(path, img_name + ".png", img_url)
+
+
+async def record(sess, rid, path, *, do_record_danmaku = True, prefer = None, reject = None):
+	danmaku_task = None
 	try:
 		logger.debug("record live %d into %s", rid, path)
 		if prefer is None:
@@ -197,6 +223,14 @@ async def record(sess, rid, path, *, prefer = None, reject = None):
 		if reject is None:
 			reject = DEFAULT_REJECT
 		logger.debug("prefer %s, reject %s", prefer, reject)
+
+		if do_record_danmaku and not runtime.credential:
+			logger.warning("missing credential, not recording danmaku")
+			do_record_danmaku = False
+
+		if do_record_danmaku:
+			danmaku_task = asyncio.create_task(record_danmaku(rid, path))
+			danmaku_task.add_done_callback(asyncio.Task.result)
 
 		stat_fail_count = 0
 		stall = runtime.Stall(LIVE_STAT_STALL_TIME)
@@ -241,7 +275,12 @@ async def record(sess, rid, path, *, prefer = None, reject = None):
 	except Exception as e:
 		logger.exception("exception in record")
 		raise
-
+	finally:
+		if danmaku_task:
+			try:
+				danmaku_task.cancel()
+			except:
+				pass
 
 # entrance
 
@@ -265,7 +304,7 @@ async def main(args):
 				if status == 1:
 					rec_name = make_record_name(user_info.get("uname", str(uid)), info.get("title"))
 					with core.locked_path(live_root, rec_name) as rec_path:
-						await record(sess, args.room, rec_path, prefer = args.prefer, reject = args.reject)
+						await record(sess, args.room, rec_path, record_danmaku = (not args.no_danmaku), prefer = args.prefer, reject = args.reject)
 
 			except Exception:
 				logger.exception("exception on checking")
@@ -283,5 +322,6 @@ if __name__ == "__main__":
 		(("room",), {"type" : int}),
 		(("-i", "--interval"), {"type" : int, "default" : 30}),
 		(("--monitor",),{"action" : "store_true"}),
+		(("--no-danmaku",), {"action" : "store_true"}),
 	])
 	asyncio.run(main(args))
