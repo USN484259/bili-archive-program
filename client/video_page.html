@@ -13,6 +13,21 @@
 	</div>
 	<ul id="parts"></ul>
 
+	<button id="suggest">show suggestions</button>
+	<table id="suggestions" hidden>
+		<thead>
+			<tr>
+				<th>cover</th>
+				<th>title</th>
+				<th>author</th>
+				<th>duration</th>
+				<th>stat</th>
+				<th>action</th>
+			</tr>
+		</thead>
+		<tbody></tbody>
+	</table>
+
 	<style>
 
 body {
@@ -69,6 +84,19 @@ li:nth-child(even) {
 	</style>
 	<script>
 
+const video_suggest_url = "https://api.bilibili.com/x/web-interface/archive/related"
+const bili_proxy_url = "/api/bili_proxy"
+const player_url = "/player.html"
+const cache_api = "/api/video_cache"
+
+function make_proxy_url(url) {
+	proxy_url = new URL(bili_proxy_url, document.location)
+	proxy_url.search = new URLSearchParams({"target": url}).toString();
+
+	console.log(proxy_url)
+	return proxy_url.toString()
+}
+
 function time_str(time_sec) {
 	let result = ""
 	if (time_sec >= 3600) {
@@ -82,6 +110,98 @@ function time_str(time_sec) {
 		+ ':' + sec.toLocaleString(undefined, {minimumIntegerDigits: 2})
 
 	return result
+}
+
+function views_str(views) {
+	const unit_table = ['', 'K', 'M', 'G', 'T']
+	let unit_index = 0
+	while (views > 1000) {
+		views /= 1000
+		unit_index += 1
+	}
+	if (unit_index == 0)
+		return views.toString()
+	else
+		return views.toPrecision(3) + unit_table[unit_index]
+}
+
+function schedule_video(ev) {
+	ev.preventDefault();
+	fetch(ev.target.action, {
+		method: "POST",
+		body: new URLSearchParams(new FormData(ev.target))
+	}).then((resp) => resp.json()).then((reply) => {
+		console.log(reply)
+		let from_elem = ev.target
+		for (let elem of from_elem.getElementsByTagName("input")) {
+			if (elem.getAttribute("type") == "submit") {
+				elem.setAttribute("value", "scheduled")
+			}
+		}
+	})
+}
+
+function show_suggestions(resp) {
+	if (resp.code != 0) {
+		console.log(info.message)
+		return
+	}
+	let suggestion_table = document.getElementById("suggestions")
+	let tbody_elem = document.createElement("tbody")
+	for (let info of resp.data) {
+		let tr_elem = document.createElement("tr")
+
+		let img_td = document.createElement("td")
+		let img_elem = document.createElement("img")
+		img_elem.setAttribute("src", make_proxy_url(info.pic))
+		img_elem.setAttribute("loading", "lazy")
+		img_elem.setAttribute("width", 120)
+		img_elem.setAttribute("height", 90)
+		img_td.appendChild(img_elem)
+		tr_elem.appendChild(img_td)
+
+		let title_elem = document.createElement("td")
+		title_elem.append(info.title)
+		tr_elem.appendChild(title_elem)
+
+		let author_elem = document.createElement("td")
+		author_elem.append(info.owner.name)
+		tr_elem.appendChild(author_elem)
+
+		let duration_elem = document.createElement("td")
+		duration_elem.append(time_str(info.duration))
+		tr_elem.appendChild(duration_elem)
+
+		let stat_elem = document.createElement("td")
+		stat_elem.append(views_str(info.stat.view) + " views")
+		tr_elem.appendChild(stat_elem)
+
+		let action_td = document.createElement("td")
+		let action_form = document.createElement("form")
+		action_form.setAttribute("method", "POST")
+		action_form.setAttribute("action", cache_api)
+
+		let action_bvid = document.createElement("input")
+		action_bvid.setAttribute("type", "hidden")
+		action_bvid.setAttribute("name", "bvid")
+		action_bvid.setAttribute("value", info.bvid)
+		action_form.appendChild(action_bvid)
+
+
+		let action_button = document.createElement("input")
+		action_button.setAttribute("type", "submit")
+		action_button.setAttribute("value", "schedule")
+		action_form.appendChild(action_button)
+
+		action_form.addEventListener("submit", schedule_video)
+		action_td.appendChild(action_form)
+		tr_elem.appendChild(action_td)
+
+		tbody_elem.appendChild(tr_elem)
+	}
+	let old_tbody = suggestion_table.getElementsByTagName("tbody")[0]
+	suggestion_table.replaceChild(tbody_elem, old_tbody)
+	suggestion_table.removeAttribute("hidden")
 }
 
 function load_video() {
@@ -98,7 +218,7 @@ function load_video() {
 	let frame = document.createElement("iframe")
 	frame.setAttribute("id", "frame")
 	frame.setAttribute("allow", "fullscreen")
-	frame.setAttribute("src", "/player.html?path=" + path)
+	frame.setAttribute("src", player_url + "?path=" + path)
 	old_frame.replaceWith(frame)
 
 	frame.focus({preventScroll: true})
@@ -119,6 +239,21 @@ addEventListener("DOMContentLoaded", () => {
 	if (!path.endsWith('/'))
 		path += '/'
 	fetch(path + "info.json").then((resp) => resp.json()).then((info) => {
+		bvid = info.bvid
+		document.getElementById("suggest").addEventListener("click", (ev) => {
+			target_url = new URL(video_suggest_url)
+			target_url.search = new URLSearchParams({"bvid": bvid}).toString();
+
+			proxy_url = make_proxy_url(target_url.toString())
+
+			fetch(proxy_url).then((resp) => {
+				if (resp.ok)
+					return resp.json();
+				else
+					throw new Error("Response status " + resp.status)
+			}).then(show_suggestions)
+		})
+
 		document.getElementById("title").append(info.title)
 		document.getElementById("uptime").append(new Date(info.pubdate * 1000).toLocaleString())
 
@@ -165,8 +300,8 @@ addEventListener("DOMContentLoaded", () => {
 
 		if (!load_video()) {
 			// cover
-			let cover_ext = info.pic.split('.').pop()
-			let cover_path = path + "cover." + cover_ext
+			let cover_name = info.pic.split('/').pop()
+			let cover_path = path + cover_name
 			let frame = document.getElementById("frame")
 			frame.setAttribute("src", cover_path)
 		}

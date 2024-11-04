@@ -13,13 +13,9 @@ from urllib.parse import urlencode
 
 import core
 import runtime
+import constants
 
 # constants
-
-USER_AGENT = {
-	"User-Agent": "Mozilla/5.0",
-	"Referer": "https://www.bilibili.com/"
-}
 
 BILI_DOMAIN = ".bilibili.com"
 CHECK_CREDENTIAL_URL = "https://api.bilibili.com/x/web-interface/nav"
@@ -99,7 +95,7 @@ def session(credential = None):
 	for k, v in credential.items():
 		cookies.set(k, v, domain = BILI_DOMAIN)
 
-	return httpx.AsyncClient(headers = USER_AGENT, timeout = timeout, cookies = cookies, follow_redirects = True)
+	return httpx.AsyncClient(headers = core.USER_AGENT, timeout = timeout, cookies = cookies, follow_redirects = True)
 
 
 async def check_credential(sess):

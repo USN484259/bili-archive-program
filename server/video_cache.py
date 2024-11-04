@@ -12,14 +12,14 @@ import argparse
 import multiprocessing
 from collections import deque
 from urllib.parse import parse_qs
-from fcgi_server import FcgiServer
+from fcgi_server import FcgiServer, HttpResponseMixin
 from fastcgi import FcgiHandler
-
-import core
 
 from cache_folder import cache_folder
 
 # constants
+
+import constants
 
 # static objects
 
@@ -29,6 +29,7 @@ multiprocessing = multiprocessing.get_context("fork")
 # helper functions
 
 def exec_download(video_root, bvid, arg_list):
+	import core
 	import runtime
 	import network
 	import video
@@ -86,7 +87,7 @@ class BVDownloader:
 
 	def schedule(self, bvid):
 		if len(self.queue) >= self.queue.maxlen:
-			raise RuntimeError("queue full")
+			return False
 
 		self.queue.append({
 			"bvid": bvid,
@@ -94,7 +95,7 @@ class BVDownloader:
 			"create_time": int(time.time() * 1000)
 		})
 		self.update()
-		return {"scheduled": bvid}
+		return True
 
 
 	def cancel(self, bvid):
@@ -105,8 +106,8 @@ class BVDownloader:
 					self.task.terminate()
 				rec["status"] = "cancelled"
 				self.update()
-				return {"cancelled": bvid}
-		return {}
+				return True
+		return False
 
 
 	def status(self):
@@ -117,42 +118,39 @@ class BVDownloader:
 		}
 
 
-class bv_play_handler(FcgiHandler):
-	def send_status_400(self):
-		self["stdout"].write(b"Content-type: text/plain\r\nStatus: 400 Bad Request\r\n\r\n400 Bad Request\r\n")
-
-	def send_status_405(self):
-		self["stdout"].write(b"Content-type: text/plain\r\nStatus: 405 Method Not Allowed\r\n\r\n405 Method Not Allowed\r\n")
-
-	def send_status_200(self, data):
-		self["stdout"].write(b"Content-type: text/json\r\nStatus: 200 OK\r\n\r\n")
-		self["stdout"].write(bytes(json.dumps(data, indent = '\t', ensure_ascii = False), "utf-8"))
-
+class bv_play_handler(HttpResponseMixin, FcgiHandler):
 	def handle(self):
 		try:
 			req_method = self.environ["REQUEST_METHOD"]
 			if req_method in ("GET", "HEAD"):
-				return self.send_status_200(self.server.status())
+				result = self.server.status()
+				return self.send_response(200, "application/json", json.dumps(result, ensure_ascii = False))
 			elif req_method != "POST":
-				return self.send_status_405()
+				return self.send_response(405)
 
 			query_str = self["stdin"].read().decode("utf-8")
 			logger.info(query_str)
 			query = parse_qs(query_str, strict_parsing = True, keep_blank_values = True)
 			if not query:
-				return self.send_status_400()
+				return self.send_response(400)
 			elif "cancel" in query:
-				bvid = core.bv_pattern.fullmatch(query["cancel"][0])[1]
-				return self.send_status_200(self.server.cancel(bvid))
+				bvid = constants.bv_pattern.fullmatch(query["cancel"][0])[1]
+				result = self.server.cancel(bvid)
+				if result:
+					return self.send_response(200, "application/json", json.dumps(result, ensure_ascii = False))
+				else:
+					return self.send_response(404)
 			elif "bvid" in query:
-				bvid = core.bv_pattern.fullmatch(query["bvid"][0])[1]
-				return self.send_status_200(self.server.schedule(bvid))
+				bvid = constants.bv_pattern.fullmatch(query["bvid"][0])[1]
+				result = self.server.schedule(bvid)
+				if result:
+					return self.send_response(200, "application/json", json.dumps(result, ensure_ascii = False))
+				else:
+					return self.send_response(429)
 
 		except Exception:
 			logger.exception("error in handle request")
-			return self.send_status_400()
-
-		return self.send_status_400()
+			return self.send_response(500)
 
 
 class BVPlayServer(FcgiServer):
@@ -175,16 +173,18 @@ class BVPlayServer(FcgiServer):
 		return result
 
 	def schedule(self, bvid):
-		self.bv_downloader.schedule(bvid)
-		return {
-			"bvid": bvid
-		}
+		result = self.bv_downloader.schedule(bvid)
+		if result:
+			return {
+				"scheduled": bvid
+			}
 
-	def cancel(self, mode):
-		result = self.bv_downloader.cancel(mode == "all")
-		return {
-			"cancelled": result
-		}
+	def cancel(self, bvid):
+		result = self.bv_downloader.cancel(bvid)
+		if result:
+			return {
+				"cancelled": bvid
+			}
 
 	def status(self):
 		return self.bv_downloader.status()
@@ -193,7 +193,7 @@ class BVPlayServer(FcgiServer):
 # entrance
 
 if __name__ == "__main__":
-	logging.basicConfig(level = logging.INFO, format = core.LOG_FORMAT, stream = sys.stderr)
+	logging.basicConfig(level = logging.INFO, format = constants.LOG_FORMAT, stream = sys.stderr)
 
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--cache", required = True)
@@ -201,7 +201,7 @@ if __name__ == "__main__":
 	parser.add_argument("args", nargs = '*')
 
 	args = parser.parse_args()
-	cache_size = core.number_with_unit(args.size)
+	cache_size = constants.number_with_unit(args.size)
 
 	logger.info("cache at %s size %d", args.cache, cache_size)
 

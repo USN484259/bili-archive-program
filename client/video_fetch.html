@@ -6,7 +6,7 @@
 <body>
 	<h1 id="title"><a href="/cache/index.html">Cached Videos</a></h1>
 
-	<form id="fetch_form" method="POST" action="/fcgi/video_cache">
+	<form id="fetch_form" method="POST" action="/api/video_cache">
 		<label for="fetch_bv">Cache new video </label>
 		<input name="bvid" id="fetch_bv" autofocus />
 	</form>
@@ -67,7 +67,7 @@ tbody tr:nth-child(even) {
 
 const cache_api = document.forms["fetch_form"].action
 const cache_root = "/cache/"
-const player_url = "/video_page.html?path=/cache/";
+const player_url = "/video_page.html";
 let localtime = new Intl.DateTimeFormat(undefined, {dateStyle: "medium", timeStyle: "medium"})
 
 
@@ -102,7 +102,7 @@ function build_tasklist() {
 				let bvid_elem = document.createElement("td")
 				let a_elem = document.createElement("a")
 				let bvid = task.bvid
-				let url = player_url + bvid
+				let url = player_url + "?path=" + cache_root + bvid
 				a_elem.setAttribute("href", url)
 				try {
 					bvid = info.title

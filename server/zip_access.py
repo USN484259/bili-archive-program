@@ -10,11 +10,12 @@ import json
 import zipfile
 import mimetypes
 from urllib.parse import parse_qs
-from fcgi_server import FcgiThreadingServer
+from fcgi_server import FcgiThreadingServer, HttpResponseMixin
 from fastcgi import FcgiHandler
 
 from threading import RLock
 from collections import OrderedDict
+
 
 class lru_cache:
 	def __init__(self, func, limit = 16):
@@ -60,51 +61,31 @@ class lru_cache:
 				return obj
 
 
-def copy_stream(dst_stream, src_stream, length, chunk_size = 0x1000):
-	count = 0
-	while count < length:
-		copy_size = min(length - count, chunk_size)
-		data = src_stream.read(copy_size)
-		if not data:
-			break
-		dst_stream.write(data)
-		count += min(copy_size, len(data))
+class zip_access_handler(HttpResponseMixin, FcgiHandler):
+	def send_file_status(self, content_type, file_size, range_head, range_tail, f):
+		req_method = self.environ.get("REQUEST_METHOD")
+		length_str = "Content-Length: %d" % (range_tail - range_head)
 
-	return count
+		def file_content_gen():
+			if req_method == "HEAD":
+				return
 
-
-class zip_access_handler(FcgiHandler):
-	def send_status_404(self, err_str = None):
-		self["stdout"].write(b"Content-type: text/plain; charset=UTF-8\r\nStatus: 404 Not Found\r\n\r\n404 Not Found\r\n")
-		if err_str:
-			self["stdout"].write(bytes(err_str, "utf-8"))
-
-	def send_status_405(self):
-		self["stdout"].write(b"Content-Type: text/plain; charset=UTF-8\r\nStatus: 405 Method Not Allowed\r\n\r\n405 Method Not Allowed\r\n")
-
-	def send_status_416(self, file_size):
-		self["stdout"].write(b"Content-Type: text/plain; charset=UTF-8\r\nStatus: 416 Range Not Satisfiable\r\n")
-		range_str = "Content-Range: bytes */%d\r\n\r\n" % file_size
-		self["stdout"].write(bytes(range_str, "utf-8"))
-
-	def send_file_status(self, content_type, file_size, range_head, range_tail):
-
-		type_str = "Content-Type: %s\r\n" % content_type
-		self["stdout"].write(bytes(type_str, "utf-8"))
+			f.seek(range_head)
+			count = 0
+			length = range_tail - range_head
+			while count < length:
+				copy_size = min(length - count, 0x1000)
+				data = f.read(copy_size)
+				if not data:
+					break
+				yield data
+				count += min(copy_size, len(data))
 
 		if range_head == 0 and range_tail == file_size:
-			self["stdout"].write(b"Status: 200 OK\r\n")
+			return self.send_response(200, mime_type = content_type, extra_headers = (length_str, ), data = file_content_gen)
 		else:
-			self["stdout"].write(b"Status: 206 Partial Content\r\n")
-			range_str = "Content-Range: bytes %d-%d/%d\r\n" % (range_head, range_tail - 1, file_size)
-			self["stdout"].write(bytes(range_str, "utf-8"))
-
-		length_str = "Content-Length: %d\r\n\r\n" % (range_tail - range_head)
-		self["stdout"].write(bytes(length_str, "utf-8"))
-
-	def send_dir_status(self, dir_list):
-		self["stdout"].write(b"Content-Type: text/json; charset=UTF-8\r\n\r\n")
-		self["stdout"].write(bytes(json.dumps(dir_list, indent = '\t', ensure_ascii = False), "utf-8"))
+			range_str = "Content-Range: bytes %d-%d/%d" % (range_head, range_tail - 1, file_size)
+			return self.send_response(206, mime_type = content_type, extra_headers = (length_str, range_str), data = file_content_gen)
 
 	def handle_dir(self, archive, path):
 		dir_list = []
@@ -121,9 +102,9 @@ class zip_access_handler(FcgiHandler):
 			})
 
 		if not dir_list:
-			self.send_status_404()
+			self.send_response(404)
 		else:
-			self.send_dir_status(dir_list)
+			self.send_response(200, mime_type = "application/json", data = json.dumps(dir_list, indent = '\t', ensure_ascii = False))
 
 
 	def handle_file(self, archive, filename):
@@ -156,28 +137,21 @@ class zip_access_handler(FcgiHandler):
 				if range_head >= range_tail:
 					raise ValueError
 			except Exception as e:
-				self.send_status_416(info.file_size)
+				range_str = "Content-Range: bytes */%d" % info.file_size
+				self.send_response(416, extra_headers = (range_str, ))
 				return
 
 		with archive.open(filename, 'r') as f:
 			mime_type = mimetypes.guess_type(filename)[0]
 
-			self.send_file_status(mime_type or "application/octet-stream", info.file_size, range_head, range_tail)
-
-			req_method = self.environ.get("REQUEST_METHOD")
-			if req_method == "HEAD":
-				return
-
-			f.seek(range_head)
-			copy_stream(self["stdout"], f, range_tail - range_head)
+			self.send_file_status(mime_type or "application/octet-stream", info.file_size, range_head, range_tail, f)
 
 
 	def handle(self):
-		global zip_cache
 		try:
 			req_method = self.environ.get("REQUEST_METHOD")
 			if req_method not in ("GET", "HEAD"):
-				self.send_status_405()
+				self.send_response(405)
 				return
 
 			www_root = self.environ.get("DOCUMENT_ROOT")
@@ -187,34 +161,34 @@ class zip_access_handler(FcgiHandler):
 			if not zip_member:
 				zip_member = "/"
 
-			archive = zip_cache(os.path.join(www_root, zip_path), mode = 'r')
+			archive = self.server.zip_cache(os.path.join(www_root, zip_path), mode = 'r')
 			if zip_member.endswith('/'):
 				self.handle_dir(archive, zip_member.rstrip('/'))
 			else:
 				self.handle_file(archive, zip_member)
 
-
 		except Exception as e:
-			self.send_status_404()
+			self.send_response(404)
 			return
 
 
-def zip_close_func(path, obj):
-	obj.close()
-
-zip_cache = lru_cache({
-	"new":	zipfile.ZipFile,
-	"del":	zip_close_func
-})
-
-
 class ZipAccessServer(FcgiThreadingServer):
+	def __init__(self, handler):
+		super().__init__(handler)
+
+		def zip_close_func(path, obj):
+			obj.close()
+
+		self.zip_cache = lru_cache({
+			"new":	zipfile.ZipFile,
+			"del":	zip_close_func
+		})
+
 	def service_actions(self):
 		super().service_actions()
-		global zip_cache
 		cur_time = time.monotonic()
-		if cur_time - zip_cache.get_access_time() > 30:
-			zip_cache.flush()
+		if cur_time - self.zip_cache.get_access_time() > 30:
+			self.zip_cache.flush()
 
 with ZipAccessServer(zip_access_handler) as server:
 	server.serve_forever()

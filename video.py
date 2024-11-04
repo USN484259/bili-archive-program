@@ -208,14 +208,12 @@ async def fetch_cover(sess, info, path, force, stall = None):
 	logger.debug("fetch video cover for %s, path %s, force %x" , info.get("bvid"), path, force)
 
 	url = info.get("pic")
-	ext = os.path.splitext(url)[1]
-	if not ext:
-		ext = ".jpg"
+	cover_name = os.path.split(url)[1]
 
-	cover_file = os.path.join(path, "cover" + ext)
-	if force or not os.path.isfile(cover_file):
+	cover_path = os.path.join(path, cover_name)
+	if force or not os.path.isfile(cover_path):
 		stall and await stall()
-		await network.fetch(sess, url, cover_file, rotate = True)
+		await network.fetch(sess, url, cover_path)
 	else:
 		logger.debug("skip cover")
 

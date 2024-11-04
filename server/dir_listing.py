@@ -6,7 +6,7 @@ sys.path[0] = os.getcwd()
 
 import json
 from urllib.parse import parse_qs
-from fcgi_server import FcgiThreadingServer
+from fcgi_server import FcgiThreadingServer, HttpResponseMixin
 from fastcgi import FcgiHandler
 
 
@@ -34,7 +34,7 @@ def dir_listing(path):
 
 	return result
 
-class dir_listing_handler(FcgiHandler):
+class dir_listing_handler(HttpResponseMixin, FcgiHandler):
 	def handle(self):
 		try:
 			doc_root = self.environ["DOCUMENT_ROOT"]
@@ -43,10 +43,9 @@ class dir_listing_handler(FcgiHandler):
 
 			data = dir_listing(os.path.join(doc_root, path))
 
-			self["stdout"].write(b"Content-type: text/json\r\nStatus: 200 OK\r\n\r\n")
-			self["stdout"].write(bytes(json.dumps(data, indent = '\t', ensure_ascii = False), "utf-8"))
+			return self.send_response(200, "application/json", json.dumps(data, indent = '\t', ensure_ascii = False))
 		except Exception:
-			self["stdout"].write(b"Content-type: text/plain\r\nStatus: 404 Not Found\r\n\r\n404 Not Found\r\n")
+			return self.send_response(404)
 
 
 if __name__ == "__main__":

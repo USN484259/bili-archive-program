@@ -18,12 +18,7 @@ from gi.repository import Notify, GLib
 
 # constants
 
-LOG_FORMAT = "%(asctime)s\t%(levelname)s\t%(name)s\t%(message)s"
-
-USER_AGENT = {
-	"User-Agent": "Mozilla/5.0",
-	"Referer": "https://www.bilibili.com/"
-}
+import constants
 
 LIVE_STATUS_URL = "https://api.live.bilibili.com/room/v1/Room/get_status_info_by_uids"
 
@@ -62,7 +57,7 @@ def load_config(config_path):
 def fetch_icon(sess, url):
 	icon_file = tempfile.NamedTemporaryFile()
 	logger.info("fetching icon into %s", icon_file.name)
-	with sess.stream("GET", url, headers = USER_AGENT) as resp:
+	with sess.stream("GET", url, headers = constants.USER_AGENT) as resp:
 		logger.debug(resp)
 		resp.raise_for_status()
 		for chunk in resp.iter_bytes():
@@ -191,7 +186,7 @@ def main(args):
 			try:
 				uid_list = load_config(args.config)
 			except Exception:
-				logger.exception("failed to relaod config")
+				logger.exception("failed to reload config")
 
 	def sig_restart(signum, frame):
 		for icon_file in rec["active_notifies"].values():
@@ -240,6 +235,6 @@ if __name__ == "__main__":
 	parser.add_argument("url", nargs = '?')
 
 	args = parser.parse_args()
-	logging.basicConfig(level = args.verbose and logging.DEBUG or logging.INFO, format = LOG_FORMAT, stream = sys.stderr)
+	logging.basicConfig(level = args.verbose and logging.DEBUG or logging.INFO, format = constants.LOG_FORMAT, stream = sys.stderr)
 
 	main(args)

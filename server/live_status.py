@@ -7,15 +7,15 @@ sys.path[0] = os.getcwd()
 import time
 import socket
 import argparse
-from fcgi_server import FcgiServer
+from fcgi_server import FcgiServer, HttpResponseMixin
 from fastcgi import FcgiHandler
 
-class live_status_handler(FcgiHandler):
+class live_status_handler(HttpResponseMixin, FcgiHandler):
 	def handle(self):
 		try:
 			timestamp = time.monotonic()
 			if self.server.timestamp and timestamp - self.server.timestamp < self.server.interval:
-				raise RuntimeError("request too frequent")
+				return self.send_response(429)
 
 			self.server.timestamp = timestamp
 
@@ -24,18 +24,17 @@ class live_status_handler(FcgiHandler):
 			try:
 				conn.connect(self.server.socket_path)
 				while True:
-					chunk = conn.recv(0x100)
+					chunk = conn.recv(0x1000)
 					if not chunk:
 						break
 					data += chunk
 			finally:
 				conn.close()
 
-			self["stdout"].write(b"Content-type: text/json\r\nStatus: 200 OK\r\n\r\n")
-			self["stdout"].write(data)
+			self.send_response(200, "application/json", data)
 		except Exception as e:
 			print(str(e), file = sys.stderr)
-			self["stdout"].write(b"Content-type: text/plain\r\nStatus: 403 Forbidden\r\n\r\n403 Forbidden\r\n")
+			return self.send_response(500)
 
 
 class LiveStatusServer(FcgiServer):

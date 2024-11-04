@@ -69,18 +69,18 @@ class LiveDanmaku:
 		self.host_index = await self.connect(0)
 
 	async def close(self):
-		if self.conn is not None:
-			try:
-				await self.conn.close()
-				await self.conn.wait_closed()
-			finally:
-				self.conn = None
 		if self.hb_task is not None:
 			try:
 				self.hb_task.cancel()
 			except:
 				pass
 			self.hb_task = None
+		if self.conn is not None:
+			try:
+				await self.conn.close()
+				await self.conn.wait_closed()
+			finally:
+				self.conn = None
 
 	async def connect(self, start_index):
 		index = start_index
@@ -91,7 +91,7 @@ class LiveDanmaku:
 				url = "wss://%s:%d/sub" % (host_info.get("host"), host_info.get("wss_port"))
 				await self.stall()
 				logger.info("connecting to live danmaku %s [%d/%d]", self.rid, index + 1, len(self.hosts))
-				self.conn = await ws_connect(url, user_agent_header = network.USER_AGENT["User-Agent"])
+				self.conn = await ws_connect(url, user_agent_header = core.USER_AGENT["User-Agent"])
 				await self.send_verity()
 				return index
 			except Exception:

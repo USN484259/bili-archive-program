@@ -8,18 +8,9 @@ import logging
 import zipfile
 import collections
 
+from constants import *
+
 # constants
-
-UNIT_TABLE = {
-	'k': 1000,
-	'ki': 0x400,
-	'm': 1000 * 1000,
-	'mi': 0x100000,
-	'g': 1000 * 1000 * 1000,
-	'gi': 0x40000000,
-}
-
-LOG_FORMAT = "%(asctime)s\t%(process)d\t%(levelname)s\t%(name)s\t%(message)s"
 
 DEFAULT_NAME_MAP = {
 	"danmaku": "danmaku.xml",
@@ -33,17 +24,8 @@ DEFAULT_NAME_MAP = {
 # static objects
 
 logger = logging.getLogger("bili_arch.core")
-unit_pattern = re.compile(r"(\d+)([kKmMgG][Ii]?)?[Bb]?")
-bv_pattern = re.compile(r"(BV\w+)")
 
 default_names = collections.namedtuple("DefaultName", DEFAULT_NAME_MAP.keys())(**DEFAULT_NAME_MAP)
-
-
-# public methods
-
-def number_with_unit(num_str):
-	match = unit_pattern.fullmatch(num_str)
-	return int(match.group(1)) * UNIT_TABLE.get(match.group(2).lower(), 1)
 
 
 ## file management
@@ -123,7 +105,6 @@ class staged_file:
 		try:
 			logger.debug("rotating %s", self.filename)
 			rotate_name = self.filename + default_names.rotate_postfix
-			arch_fd = os.open
 			touch(rotate_name)
 			with locked_file(rotate_name, "r+b") as arch_fd:
 				with zipfile.ZipFile(arch_fd, mode = "a") as archive:

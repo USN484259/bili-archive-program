@@ -82,6 +82,28 @@ def verify_media(path, part_duration, duration_tolerance):
 		return 0, 0
 
 
+def verify_cover(path, name, scan_files):
+	cover_path = os.path.join(path, name)
+	logger.debug("checking cover %s", cover_path)
+	if not os.path.isfile(cover_path):
+		return False
+
+	if scan_files:
+		media_info = ffprobe(cover_path)
+		try:
+			codec = media_info.get("streams")[0].get("codec_name")
+			logger.debug("cover codec %s", codec)
+			if codec not in ["mjpeg", "png", "gif", "bmp"]:
+				return False
+
+		except Exception as e:
+			logger.exception("exception on verify cover for %s", cover_path)
+			return False
+
+	logger.debug("found cover %s", name)
+	return True
+
+
 def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = None):
 	if scan_files and not ffprobe_bin:
 		raise RuntimeError("ffprobe binary not found")
@@ -100,25 +122,10 @@ def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = 
 
 		if 'C' not in ignore:
 			result["cover"] = False
-			for ext in [".jpg", ".png", ".gif", ".bmp"]:
-				cover_file = os.path.join(bv_root, "cover" + ext)
-				logger.debug("checking cover %s", cover_file)
-				if not os.path.isfile(cover_file):
-					continue
-				if scan_files:
-					media_info = ffprobe(cover_file)
-					try:
-						codec = media_info.get("streams")[0].get("codec_name")
-						logger.debug("cover codec %s", codec)
-						if codec not in ["mjpeg", "png", "gif", "bmp"]:
-							continue
-					except Exception as e:
-						logger.exception("exception on verify cover for %s", cover_file)
-						continue
 
-				logger.debug("found cover, format %s", ext)
+			cover_name = os.path.split(bv_info.get("pic", ""))[1]
+			if cover_name and verify_cover(bv_root, cover_name, scan_files):
 				result["cover"] = True
-				break
 			else:
 				logger.warning("cover not found")
 

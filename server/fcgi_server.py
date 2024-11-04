@@ -35,14 +35,57 @@ class FcgiThreadingServer(ThreadingMixIn, FcgiServer):
 	pass
 
 
+class HttpResponseMixin:
+	status_table = {
+		200:	"200 OK",
+		206:	"206 Partial Content",
+		400:	"400 Bad Request",
+		403:	"403 Forbidden",
+		404:	"404 Not Found",
+		405:	"405 Method Not Allowed",
+		416:	"416 Range Not Satisfiable",
+		429:	"429 Too Many Requests",
+		500:	"500 Internal Server Error",
+		502:	"502 Bad Gateway",
+		504:	"504 Gateway Timeout",
+	}
+
+	def send_response(self, code, /, mime_type = "text/plain", data = None, *, extra_headers = []):
+		resp_name = self.status_table.get(code)
+		if not resp_name:
+			return self.send_response(502)
+
+		mime_ext = ""
+		if mime_type.startswith("text/"):
+			mime_ext = "; charset=utf-8"
+		resp_str = "Content-type: %s%s\r\nStatus: %s\r\n" % (mime_type, mime_ext, resp_name)
+		self["stdout"].write(resp_str.encode())
+		for header in extra_headers:
+			self["stdout"].write(header.encode() + b"\r\n")
+		self["stdout"].write(b"\r\n")
+		if data:
+			if callable(data):
+				for chunk in data():
+					self["stdout"].write(chunk)
+				return
+
+			if isinstance(data, str):
+				data = data.encode()
+			self["stdout"].write(data)
+		elif code >= 400 and mime_type == "text/plain":
+			self["stdout"].write(resp_name.encode())
+
+
 if __name__ == "__main__":
+	import os
+	sys.path[0] = os.getcwd()
+
 	import json
 	from fastcgi import FcgiHandler
 
-	class fcgi_debug_handler(FcgiHandler):
+	class fcgi_debug_handler(HttpResponseMixin, FcgiHandler):
 		def handle(self):
-			self["stdout"].write(b"Content-type: text/json\r\nStatus: 200 OK\r\n\r\n")
-			self["stdout"].write(bytes(json.dumps(self.environ, indent = '\t', ensure_ascii = False), "utf-8"))
+			self.send_response(200, "application/json", json.dumps(self.environ, indent = '\t', ensure_ascii = False))
 
 	with FcgiServer(fcgi_debug_handler) as server:
 		server.serve_forever()
