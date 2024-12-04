@@ -5,12 +5,24 @@
 </head>
 <body>
 	<h1 id="title"></h1>
-	<table id="live_status">
+	<label for="active_rooms">Active rooms</label>
+	<table id="active_rooms">
 		<thead>
 			<tr>
 				<th>name</th>
 				<th>title</th>
 				<th>live-time</th>
+			</tr>
+		</thead>
+		<tbody>
+		</tbody>
+	</table>
+	<label for="inactive_rooms">Inactive rooms</label>
+	<table id="inactive_rooms">
+		<thead>
+			<tr>
+				<th>name</th>
+				<th>title</th>
 			</tr>
 		</thead>
 		<tbody>
@@ -75,14 +87,10 @@ function build_live_list() {
 	fetch(live_status_api).then((resp) => resp.json()).then((live_status) => {
 		console.log(live_status)
 
-		let table_elem = document.getElementById("live_status")
-		let tbody_elem = document.createElement("tbody")
+		let active_tbody = document.createElement("tbody")
+		let inactive_tbody = document.createElement("tbody")
 		let active_count = 0
 		for (let [uid, status] of Object.entries(live_status)) {
-			if (status.live_status != 1)
-				continue
-
-			active_count += 1
 			let tr_elem = document.createElement("tr")
 
 			// user
@@ -103,18 +111,31 @@ function build_live_list() {
 			title_a_elem.append(status.title)
 			title_elem.append(title_a_elem)
 
-			// live_time
-			let live_time_elem = document.createElement("td")
-			live_time_elem.append(live_time_str(status.live_time))
+			tr_elem.append(user_elem, title_elem)
+			if (status.live_status == 1) {
+				// live_time
+				let live_time_elem = document.createElement("td")
+				live_time_elem.append(live_time_str(status.live_time))
+				tr_elem.append(live_time_elem)
+			}
 
-			tr_elem.append(user_elem, title_elem, live_time_elem)
-			tbody_elem.append(tr_elem)
+			if (status.live_status == 1) {
+				active_tbody.append(tr_elem)
+				active_count += 1
+			} else {
+				inactive_tbody.append(tr_elem)
+			}
 		}
-		let old_tbody = table_elem.getElementsByTagName("tbody")[0]
-		table_elem.replaceChild(tbody_elem, old_tbody)
+		let active_room = document.getElementById("active_rooms")
+		let active_old_tbody = active_room.getElementsByTagName("tbody")[0]
+		active_room.replaceChild(active_tbody, active_old_tbody)
+
+		let inactive_room = document.getElementById("inactive_rooms")
+		let inactive_old_tbody = inactive_room.getElementsByTagName("tbody")[0]
+		inactive_room.replaceChild(inactive_tbody, inactive_old_tbody)
 
 		let title_elem = document.getElementById("title")
-		title_elem.replaceChildren("Active live rooms: " + active_count)
+		title_elem.replaceChildren("Active live rooms: " + active_count + '/' + Object.keys(live_status).length)
 	});
 }
 

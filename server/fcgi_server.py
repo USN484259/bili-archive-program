@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import sys
+import json
 import socket
 from socketserver import BaseServer, ThreadingMixIn
 
@@ -71,6 +72,9 @@ class HttpResponseMixin:
 
 			if isinstance(data, str):
 				data = data.encode()
+			elif (not isinstance(data, bytes)) and ("json" in mime_type):
+				data = json.dumps(data, indent = '\t', ensure_ascii = False).encode()
+
 			self["stdout"].write(data)
 		elif code >= 400 and mime_type == "text/plain":
 			self["stdout"].write(resp_name.encode())
@@ -80,12 +84,11 @@ if __name__ == "__main__":
 	import os
 	sys.path[0] = os.getcwd()
 
-	import json
 	from fastcgi import FcgiHandler
 
 	class fcgi_debug_handler(HttpResponseMixin, FcgiHandler):
 		def handle(self):
-			self.send_response(200, "application/json", json.dumps(self.environ, indent = '\t', ensure_ascii = False))
+			self.send_response(200, "application/json", self.environ)
 
 	with FcgiServer(fcgi_debug_handler) as server:
 		server.serve_forever()

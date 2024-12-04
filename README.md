@@ -30,6 +30,7 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 |	zip_access.py	|	any	|	M		|	M		|			|			|
 |	video_cache.py	|	UNIX	|	M		|	M		|	M		|	M		|
 |	live_status.py	|	UNIX	|	M		|	M		|	M		|			|
+|	bili_proxy.py	|	any	|	M		|	M		|	M		|			|
 
 ### http前端
 

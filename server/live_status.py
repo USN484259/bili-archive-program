@@ -15,7 +15,7 @@ class live_status_handler(HttpResponseMixin, FcgiHandler):
 		try:
 			timestamp = time.monotonic()
 			if self.server.timestamp and timestamp - self.server.timestamp < self.server.interval:
-				return self.send_response(429)
+				return self.send_response(200, "application/json", self.server.cached_result)
 
 			self.server.timestamp = timestamp
 
@@ -31,7 +31,8 @@ class live_status_handler(HttpResponseMixin, FcgiHandler):
 			finally:
 				conn.close()
 
-			self.send_response(200, "application/json", data)
+			self.server.cached_result = data
+			return self.send_response(200, "application/json", data)
 		except Exception as e:
 			print(str(e), file = sys.stderr)
 			return self.send_response(500)
@@ -45,6 +46,7 @@ class LiveStatusServer(FcgiServer):
 		self.socket_path = socket_path
 		self.interval = interval
 		self.timestamp = None
+		self.cached_result = {}
 
 
 if __name__ == "__main__":

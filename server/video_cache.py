@@ -5,7 +5,6 @@ import sys
 sys.path[0] = os.getcwd()
 
 import time
-import json
 import asyncio
 import logging
 import argparse
@@ -110,11 +109,33 @@ class BVDownloader:
 		return False
 
 
-	def status(self):
-		self.update()
+	def status(self, since):
+		logger.debug("read status since %d", since)
+		def make_diff_list(rec_list, since, check_first = False):
+			if since == 0:
+				return list(rec_list)
+
+			result = []
+			i = len(rec_list)
+			while (i > 0):	# reverse iteration
+				rec = rec_list[i-1]
+				if rec.get("create_time", 0) <= since and rec.get("start_time", 0) <= since and rec.get("stop_time", 0) <= since:
+					break
+				result.append(rec)
+				i -= 1
+
+			if check_first and i > 0:
+				rec = rec_list[0]
+				if rec["status"] == "running":
+					result.append(rec)
+
+			return list(reversed(result))
+
 		return {
-			"queue": list(self.queue),
-			"record": list(self.record)
+			"timestamp": int(time.time() * 1000),
+			"since": since,
+			"queue": make_diff_list(self.queue, since, True),
+			"record": make_diff_list(self.record, since),
 		}
 
 
@@ -122,31 +143,42 @@ class bv_play_handler(HttpResponseMixin, FcgiHandler):
 	def handle(self):
 		try:
 			req_method = self.environ["REQUEST_METHOD"]
-			if req_method in ("GET", "HEAD"):
-				result = self.server.status()
-				return self.send_response(200, "application/json", json.dumps(result, ensure_ascii = False))
-			elif req_method != "POST":
+			if req_method not in ("GET", "POST", "HEAD"):
 				return self.send_response(405)
 
-			query_str = self["stdin"].read().decode("utf-8")
-			logger.info(query_str)
-			query = parse_qs(query_str, strict_parsing = True, keep_blank_values = True)
-			if not query:
-				return self.send_response(400)
-			elif "cancel" in query:
-				bvid = constants.bv_pattern.fullmatch(query["cancel"][0])[1]
-				result = self.server.cancel(bvid)
-				if result:
-					return self.send_response(200, "application/json", json.dumps(result, ensure_ascii = False))
-				else:
-					return self.send_response(404)
-			elif "bvid" in query:
-				bvid = constants.bv_pattern.fullmatch(query["bvid"][0])[1]
-				result = self.server.schedule(bvid)
-				if result:
-					return self.send_response(200, "application/json", json.dumps(result, ensure_ascii = False))
-				else:
-					return self.send_response(429)
+			if req_method in ("GET", "HEAD"):
+				query_str = self.environ.get("QUERY_STRING")
+				since = 0
+				if query_str:
+					query = parse_qs(query_str, strict_parsing = True)
+					try:
+						since = int(query.get("since")[0])
+					except (ValueError, IndexError):
+						pass
+				result = self.server.status(since)
+				return self.send_response(200, "application/json", result)
+
+			else:	# POST
+				query_str = self["stdin"].read().decode("utf-8")
+				logger.info("query: %s", query_str)
+				query = parse_qs(query_str, strict_parsing = True)
+
+				if not query:
+					return self.send_response(400)
+				elif "cancel" in query:
+					bvid = constants.bv_pattern.fullmatch(query["cancel"][0])[1]
+					result = self.server.cancel(bvid)
+					if result:
+						return self.send_response(200, "application/json", result)
+					else:
+						return self.send_response(404)
+				elif "bvid" in query:
+					bvid = constants.bv_pattern.fullmatch(query["bvid"][0])[1]
+					result = self.server.schedule(bvid)
+					if result:
+						return self.send_response(200, "application/json", result)
+					else:
+						return self.send_response(429)
 
 		except Exception:
 			logger.exception("error in handle request")
@@ -186,9 +218,12 @@ class BVPlayServer(FcgiServer):
 				"cancelled": bvid
 			}
 
-	def status(self):
-		return self.bv_downloader.status()
+	def status(self, since = None):
+		return self.bv_downloader.status(since or 0)
 
+	def service_actions(self):
+		super().service_actions()
+		self.bv_downloader.update()
 
 # entrance
 
@@ -206,4 +241,4 @@ if __name__ == "__main__":
 	logger.info("cache at %s size %d", args.cache, cache_size)
 
 	with BVPlayServer(bv_play_handler, args.cache, cache_size, args.args) as server:
-		server.serve_forever(poll_interval = 5)
+		server.serve_forever(poll_interval = 2)

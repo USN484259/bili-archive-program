@@ -6,7 +6,6 @@ sys.path[0] = os.getcwd()
 
 import re
 import time
-import json
 import zipfile
 import mimetypes
 from urllib.parse import parse_qs
@@ -102,9 +101,9 @@ class zip_access_handler(HttpResponseMixin, FcgiHandler):
 			})
 
 		if not dir_list:
-			self.send_response(404)
+			return self.send_response(404)
 		else:
-			self.send_response(200, mime_type = "application/json", data = json.dumps(dir_list, indent = '\t', ensure_ascii = False))
+			return self.send_response(200, mime_type = "application/json", data = dir_list)
 
 
 	def handle_file(self, archive, filename):
@@ -138,8 +137,7 @@ class zip_access_handler(HttpResponseMixin, FcgiHandler):
 					raise ValueError
 			except Exception as e:
 				range_str = "Content-Range: bytes */%d" % info.file_size
-				self.send_response(416, extra_headers = (range_str, ))
-				return
+				return self.send_response(416, extra_headers = (range_str, ))
 
 		with archive.open(filename, 'r') as f:
 			mime_type = mimetypes.guess_type(filename)[0]
@@ -151,8 +149,7 @@ class zip_access_handler(HttpResponseMixin, FcgiHandler):
 		try:
 			req_method = self.environ.get("REQUEST_METHOD")
 			if req_method not in ("GET", "HEAD"):
-				self.send_response(405)
-				return
+				return self.send_response(405)
 
 			www_root = self.environ.get("DOCUMENT_ROOT")
 			query = parse_qs(self.environ.get("QUERY_STRING"), strict_parsing = True)
@@ -168,8 +165,7 @@ class zip_access_handler(HttpResponseMixin, FcgiHandler):
 				self.handle_file(archive, zip_member)
 
 		except Exception as e:
-			self.send_response(404)
-			return
+			return self.send_response(404)
 
 
 class ZipAccessServer(FcgiThreadingServer):

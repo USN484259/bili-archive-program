@@ -304,7 +304,7 @@ async def main(args):
 				if status == 1:
 					rec_name = make_record_name(user_info.get("uname", str(uid)), info.get("title"))
 					with core.locked_path(live_root, rec_name) as rec_path:
-						await record(sess, args.room, rec_path, record_danmaku = (not args.no_danmaku), prefer = args.prefer, reject = args.reject)
+						await record(sess, args.room, rec_path, do_record_danmaku = (not args.no_danmaku), prefer = args.prefer, reject = args.reject)
 
 			except Exception:
 				logger.exception("exception on checking")

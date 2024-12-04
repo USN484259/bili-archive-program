@@ -4,7 +4,6 @@ import os
 import sys
 sys.path[0] = os.getcwd()
 
-import json
 from urllib.parse import parse_qs
 from fcgi_server import FcgiThreadingServer, HttpResponseMixin
 from fastcgi import FcgiHandler
@@ -43,7 +42,7 @@ class dir_listing_handler(HttpResponseMixin, FcgiHandler):
 
 			data = dir_listing(os.path.join(doc_root, path))
 
-			return self.send_response(200, "application/json", json.dumps(data, indent = '\t', ensure_ascii = False))
+			return self.send_response(200, "application/json", data)
 		except Exception:
 			return self.send_response(404)
 

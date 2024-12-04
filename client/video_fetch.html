@@ -10,7 +10,7 @@
 		<label for="fetch_bv">Cache new video </label>
 		<input name="bvid" id="fetch_bv" autofocus />
 	</form>
-	<table id="tasklist">
+	<table>
 		<thead>
 			<tr>
 				<th>bvid</th>
@@ -21,7 +21,7 @@
 				<th>action</th>
 			</tr>
 		</thead>
-		<tbody>
+		<tbody id="tasklist">
 		</tbody>
 	</table>
 	<style>
@@ -70,7 +70,6 @@ const cache_root = "/cache/"
 const player_url = "/video_page.html";
 let localtime = new Intl.DateTimeFormat(undefined, {dateStyle: "medium", timeStyle: "medium"})
 
-
 function append_time(tr_elem, item, key) {
 	let td_elem = document.createElement("td")
 	let datetime = item[key]
@@ -80,69 +79,90 @@ function append_time(tr_elem, item, key) {
 	tr_elem.appendChild(td_elem)
 }
 
+function update_task(task_map, task_info, bv_info) {
+	let bvid = task_info.bvid
+	let tr_elem = document.createElement("tr")
+	tr_elem.id = bvid
 
-function build_tasklist() {
-	fetch(cache_api).then((resp) => resp.json()).then((info_table) => {
-		console.log(info_table)
-		let task_list = info_table.record.concat(info_table.queue).reverse()
+	// bvid
+	let bvid_elem = document.createElement("td")
+	let a_elem = document.createElement("a")
+	let url = player_url + "?path=" + cache_root + bvid
+	a_elem.setAttribute("href", url)
+
+	let title = bvid
+	try {
+		title = bv_info.title
+	} catch (err) {}
+	a_elem.append(title)
+	bvid_elem.append(a_elem)
+	tr_elem.appendChild(bvid_elem)
+
+	// status
+	let stat_elem = document.createElement("td")
+	stat_elem.append(task_info.status)
+	tr_elem.appendChild(stat_elem)
+
+	append_time(tr_elem, task_info, "create_time")
+	append_time(tr_elem, task_info, "start_time")
+	append_time(tr_elem, task_info, "stop_time")
+
+	let old_elem = task_map[bvid]
+	let table_elem = document.getElementById("tasklist")
+
+	if (old_elem) {
+		console.assert(table_elem == old_elem.parentNode)
+		old_elem.replaceWith(tr_elem)
+	}
+	table_elem.insertBefore(tr_elem, table_elem.firstElementChild)
+
+	task_map[bvid] = tr_elem
+}
+
+function build_tasklist(args) {
+	url = new URL(cache_api, document.location)
+	if (args.last_update_time)
+		url.search = new URLSearchParams({"since": args.last_update_time}).toString()
+
+	fetch(url).then((resp) => resp.json()).then((stats) => {
+		console.log(stats)
+		let task_list = stats.record.concat(stats.queue)
 		Promise.all(
 			task_list.map(
 				(task) => fetch(cache_root + task.bvid + "/info.json").then((resp) => resp.json()).catch((err) => {})
 			)
 		).then((info_list) => {
 			console.log(info_list)
-			let table_elem = document.getElementById("tasklist")
-			let tbody_elem = document.createElement("tbody")
 			for (let i = 0; i < task_list.length; i++) {
 				let task = task_list[i]
 				let info = info_list[i]
-				let tr_elem = document.createElement("tr")
 
-				// bvid
-				let bvid_elem = document.createElement("td")
-				let a_elem = document.createElement("a")
-				let bvid = task.bvid
-				let url = player_url + "?path=" + cache_root + bvid
-				a_elem.setAttribute("href", url)
-				try {
-					bvid = info.title
-				} catch (err) {}
-				a_elem.append(bvid)
-				bvid_elem.append(a_elem)
-				tr_elem.appendChild(bvid_elem)
-
-				// status
-				let stat_elem = document.createElement("td")
-				stat_elem.append(task.status)
-				tr_elem.appendChild(stat_elem)
-
-				append_time(tr_elem, task, "create_time")
-				append_time(tr_elem, task, "start_time")
-				append_time(tr_elem, task, "stop_time")
-
-				tbody_elem.append(tr_elem)
+				update_task(args.map, task, info)
 			}
-
-			let old_tbody = table_elem.getElementsByTagName("tbody")[0]
-			table_elem.replaceChild(tbody_elem, old_tbody)
+			args.last_update_time = stats.timestamp
 		});
 	});
 }
 
-document.forms["fetch_form"].addEventListener("submit", (ev) => {
-	ev.preventDefault();
-	fetch(ev.target.action, {
-		method: "POST",
-		body: new URLSearchParams(new FormData(ev.target))
-	}).then((resp) => {
-		ev.target.reset();
-		build_tasklist();
-	});
-});
 
 addEventListener("DOMContentLoaded", () => {
-	build_tasklist();
-	setInterval(build_tasklist, 10 * 1000);
+	let record = {
+		"map": {}
+	}
+	document.forms["fetch_form"].addEventListener("submit", (ev) => {
+		ev.preventDefault();
+		fetch(ev.target.action, {
+			method: "POST",
+			body: new URLSearchParams(new FormData(ev.target))
+		}).then((resp) => {
+			ev.target.reset();
+			build_tasklist(record);
+		});
+	});
+
+
+	build_tasklist(record);
+	setInterval(build_tasklist, 4 * 1000, record);
 });
 	</script>
 </body>

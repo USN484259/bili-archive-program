@@ -5,15 +5,24 @@
 </head>
 <body>
 	<img id="frame" />
-	<div id="info">
-		<h3 id="title"></h3>
-		<span id="author"></span>
-		<span id="uptime"></span>
+	<div class="info">
+		<div>
+			<span id="title"></span>
+			<span id="stat"></span>
+		</div>
+		<div>
+			<span id="author"></span>
+			<span id="uptime"></span>
+		</div>
+
 		<textarea id="desc" readonly></textarea>
 	</div>
 	<ul id="parts"></ul>
 
-	<button id="suggest">show suggestions</button>
+	<div class="info">
+		<button id="suggest">show suggestions</button>
+		<span id="bvid"></span>
+	</div>
 	<table id="suggestions" hidden>
 		<thead>
 			<tr>
@@ -21,7 +30,7 @@
 				<th>title</th>
 				<th>author</th>
 				<th>duration</th>
-				<th>stat</th>
+				<th>likes/views</th>
 				<th>action</th>
 			</tr>
 		</thead>
@@ -41,8 +50,25 @@ body {
 	object-fit: contain;
 }
 
+.info {
+	width: 90%;
+}
+
 #title {
-	width: 100%;
+	font-size: 120%;
+	font-weight: bold;
+}
+
+#bvid {
+	font-size: 80%;
+}
+
+#author {
+	font-weight: bold;
+}
+
+#stat, #uptime, #bvid {
+	float: right;
 }
 
 #desc {
@@ -50,18 +76,6 @@ body {
 	height: 20vh;
 	min-height: 100px;
 	resize: vertical;
-}
-
-#info {
-	width: 90%;
-}
-
-#author {
-	font-weight: bold;
-}
-
-#uptime {
-	float: right;
 }
 
 ul {
@@ -112,7 +126,7 @@ function time_str(time_sec) {
 	return result
 }
 
-function views_str(views) {
+function stat_str(views) {
 	const unit_table = ['', 'K', 'M', 'G', 'T']
 	let unit_index = 0
 	while (views > 1000) {
@@ -152,12 +166,21 @@ function show_suggestions(resp) {
 		let tr_elem = document.createElement("tr")
 
 		let img_td = document.createElement("td")
+		let pic_elem = document.createElement("picture")
+		if (info.pic.indexOf("@") < 0) {
+			// build thumbnail picture
+			let thumbnail = info.pic + "@160w_120h_1c_!web-video-rcmd-cover.webp"
+			let src_elem = document.createElement("source")
+			src_elem.setAttribute("srcset", make_proxy_url(thumbnail))
+			pic_elem.appendChild(src_elem)
+		}
 		let img_elem = document.createElement("img")
 		img_elem.setAttribute("src", make_proxy_url(info.pic))
 		img_elem.setAttribute("loading", "lazy")
-		img_elem.setAttribute("width", 120)
-		img_elem.setAttribute("height", 90)
-		img_td.appendChild(img_elem)
+		img_elem.setAttribute("width", 160)
+		img_elem.setAttribute("height", 120)
+		pic_elem.appendChild(img_elem)
+		img_td.appendChild(pic_elem)
 		tr_elem.appendChild(img_td)
 
 		let title_elem = document.createElement("td")
@@ -173,7 +196,7 @@ function show_suggestions(resp) {
 		tr_elem.appendChild(duration_elem)
 
 		let stat_elem = document.createElement("td")
-		stat_elem.append(views_str(info.stat.view) + " views")
+		stat_elem.append(stat_str(info.stat.like) + '/' + stat_str(info.stat.view))
 		tr_elem.appendChild(stat_elem)
 
 		let action_td = document.createElement("td")
@@ -255,7 +278,9 @@ addEventListener("DOMContentLoaded", () => {
 		})
 
 		document.getElementById("title").append(info.title)
+		document.getElementById("stat").append("likes/views: " + stat_str(info.stat.like) + '/' + stat_str(info.stat.view))
 		document.getElementById("uptime").append(new Date(info.pubdate * 1000).toLocaleString())
+		document.getElementById("bvid").append(info.bvid)
 
 		// authors
 		let authors = ""

@@ -176,7 +176,7 @@ def main(args):
 		"status_rec": {},
 		"active_notifies": {},
 	}
-	sess = httpx.Client(headers = USER_AGENT, timeout = min(10, args.interval / 2), follow_redirects = True)
+	sess = httpx.Client(headers = constants.USER_AGENT, timeout = min(10, args.interval / 2), follow_redirects = True)
 
 	def sig_reload(signum, frame):
 		logger.info("reset live status")
