@@ -19,8 +19,8 @@ USER_AGENT = {
 }
 
 
-
-bv_pattern = re.compile(r"(BV\w+)")
+# https://github.com/SocialSisterYi/bilibili-API-collect/blob/master/docs/misc/bvid_desc.md
+bvid_pattern = re.compile(r"(BV1[1-9A-HJ-NP-Za-km-z]{9})")
 unit_pattern = re.compile(r"(\d+)([kKmMgG][Ii]?)?[Bb]?")
 
 

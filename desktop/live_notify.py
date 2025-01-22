@@ -2,6 +2,8 @@
 
 import os
 import sys
+sys.path[0] = os.getcwd()
+
 import time
 import json
 import httpx

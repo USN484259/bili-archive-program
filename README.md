@@ -78,6 +78,60 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 + -s	设置请求间隔时间
 
 
+## 参考部署
+
+```sh
+# 安装软件包
+sudo apt install lighttpd python3-pip python3-httpx python3-watchdog
+
+# 修改lighttpd服务
+sudo mkdir -p /etc/systemd/system/lighttpd.service.d/
+sudo install -m 0644 config/override.conf /etc/systemd/system/lighttpd.service.d/override.conf
+sudoedit /etc/systemd/system/lighttpd.service.d/override.conf	# 修改 CODE_PATH
+
+# 创建http目录结构
+sudo mkdir -p /srv/http/code /srv/http/tmp /srv/http/html /srv/http/fcgi
+sudo install -m 0664 config/lighttpd.conf /srv/http/lighttpd.conf
+sudo chown root:$(id -ng) /srv/http/html /srv/http/fcgi /srv/http/lighttpd.conf
+sudo chmod 0775 /srv/http/html /srv/http/fcgi
+
+# 初始化html目录
+cd /srv/http/html
+for f in ../code/client/*.html
+do
+	ln -s $f
+done
+ln -s ../tmp/cache
+ln -s /PATH/TO/flv.min.js
+ln -s /PATH/TO/hls.min.js
+# 链接其他需要通过http访问的内容
+
+# 初始化fcgi目录
+cd /srv/http/fcgi
+# 通过pip3安装fastcgi
+pip3 install --target /srv/http/fcgi --no-compile --no-deps fastcore fastcgi
+# httpx和watchdog也可通过pip3安装
+# pip3 install --target /srv/http/fcgi --no-compile httpx watchdog
+for f in constants.py core.py runtime.py network.py verify.py video.py
+do
+	ln -s ../code/$f
+done
+for f in ../code/server/*.py
+do
+	ln -s $f
+done
+# 链接其他需要的FCGI接口
+
+# 检查/修改lighttpd.conf，如仅在localhost上服务
+vim /srv/http/lighttpd.conf
+# 设置防火墙
+# sudo ufw allow http
+# 启动http服务
+sudo systemctl daemon-reload
+sudo systemctl restart lighttpd
+
+```
+
 ## 引用
 
 ### 相关链接

@@ -19,7 +19,7 @@ DEFAULT_PREFER = "avc"
 DEFAULT_REJECT = "hevc unknown"
 
 BV_INFO_URL = "https://api.bilibili.com/x/web-interface/view"
-DANMAKU_URL = "https://comment.bilibili.com/%d.xml"
+DANMAKU_URL = "https://comment.bilibili.com/%s.xml"
 PLAY_INFO_URL = "https://api.bilibili.com/x/player/playurl"
 
 # static objects
@@ -32,7 +32,6 @@ codec_name_map = collections.defaultdict(lambda: "unknown", [
 ])
 
 logger = logging.getLogger("bili_arch.video")
-part_pattern = re.compile(r"([VSD]):(\d+)")
 
 # helper functions
 
@@ -54,8 +53,8 @@ async def get_play_info(sess, bvid, cid):
 
 
 # stub
-def verify_bv(bv_root):
-	return verify.verify_bv(bv_root, ignore = "S")
+def verify_bv(bv_root, ignore):
+	return verify.verify_bv(bv_root, ignore = ignore + "S")
 
 
 def is_interactive(info):
@@ -95,9 +94,10 @@ def find_best(info, prefer = "", reject = ""):
 	return result
 
 
-def find_best_url_dash(info, *, prefer, reject):
+def find_best_url_dash(info, request, *, prefer, reject):
 	result = {}
-	def fill_url(name, ext, dummy_name = None):
+	components = ""
+	def fill_url(name, ext):
 		url_info = find_best(info.get(name, []), prefer, reject)
 		if not url_info:
 			norej_info = find_best(info.get(name, []), prefer)
@@ -107,33 +107,37 @@ def find_best_url_dash(info, *, prefer, reject):
 
 		if url_info:
 			file_name = str(url_info.get("id")) + ext
-			url_list = [ url_info.get("base_url") ] + url_info.get("backup_url")
+			url_list = [ url_info.get("base_url") ] + url_info.get("backup_url", [])
 			if url_list:
 				result[file_name] = url_list
-				return
+				return True
 
-		if dummy_name:
-			logger.warning("no %s", name)
-			result[dummy_name] = []
+	if 'V' in request:
+		if fill_url("video", ".m4v"):
+			components += 'V'
 		else:
-			raise RuntimeError("no url info for %s", name)
+			logger.warning("no url info for video")
 
-	fill_url("video", ".m4v")
-	fill_url("audio", ".m4a", core.default_names.noaudio)
-	return result
+	if 'A' in request:
+		if fill_url("audio", ".m4a"):
+			components += 'A'
+		else:
+			logger.warning("no url info for audio")
+
+	return result, components
 
 
 def find_best_url_durl(info, *, prefer, reject):
 	return {
-		"video.flv": [ info[0]["url"] ] + info[0]["backup_url"]
-	}
+		"video.flv": [ info[0]["url"] ] + info[0].get("backup_url", [])
+	}, "VA"
 
 
 async def fetch_interactive_info(sess, info, stall = None):
 	raise NotImplementedError("interactive video not implemented")
 
 
-async def fetch_info(sess, bv, stall = None):
+async def fetch_info(sess, bv, /, stall = None):
 	logger.debug("fetch video info %s", bv)
 	stall and await stall()
 	info = await get_bv_info(sess, bv)
@@ -160,8 +164,8 @@ async def fetch_info(sess, bv, stall = None):
 	return info
 
 
-async def fetch_part(sess, bvid, cid, path, force, /, stall = None, *, prefer = None, reject = None):
-	logger.debug("fetch part for %d, path %s, force %x", cid, path, force)
+async def fetch_part(sess, bvid, cid, path, force, /, stall = None, *, request = "VA", prefer = None, reject = None):
+	logger.debug("fetch part for %s, path %s, force %x", cid, path, force)
 	stall and await stall()
 	play_info = await get_play_info(sess, bvid, cid)
 
@@ -171,14 +175,18 @@ async def fetch_part(sess, bvid, cid, path, force, /, stall = None, *, prefer = 
 		reject = DEFAULT_REJECT
 	logger.debug("prefer %s, reject %s", prefer, reject)
 
+	components = request
 	if "dash" in play_info:
 		logger.debug("dash format")
-		url_info = find_best_url_dash(play_info.get("dash"), prefer = prefer, reject = reject)
+		url_info, components = find_best_url_dash(play_info.get("dash"), request, prefer = prefer, reject = reject)
 	elif "durl" in play_info:
 		logger.debug("durl format")
 		url_info = find_best_url_durl(play_info.get("durl"), prefer = prefer, reject = reject)
 	else:
 		raise RuntimeError("unknown URL format")
+
+	if components != request:
+		logger.warning("missing components %s/%s", components, request)
 
 	exception = None
 	for name, url_list in url_info.items():
@@ -196,12 +204,17 @@ async def fetch_part(sess, bvid, cid, path, force, /, stall = None, *, prefer = 
 				await network.fetch(sess, url, file_path)
 				break
 			except Exception:
-				logger.exception("failed to fetch part %d", cid)
+				logger.exception("failed to fetch part %s", cid)
 		else:
-			exception = Exception("cannot fetch %s:%d:%s after %d attempts", bvid, cid, name, len(url_list))
+			exception = Exception("cannot fetch %s:%s:%s after %d attempts" % (bvid, cid, name, len(url_list)))
 
 	if exception is not None:
 		raise exception
+
+	if 'V' in request and 'V' not in components:
+		core.touch(core.default_names.novideo)
+	if 'A' in request and 'A' not in components:
+		core.touch(core.default_names.noaudio)
 
 
 async def fetch_cover(sess, info, path, force, stall = None):
@@ -219,7 +232,7 @@ async def fetch_cover(sess, info, path, force, stall = None):
 
 
 async def fetch_danmaku(sess, cid, path, force, stall = None):
-	logger.debug("fetch danmaku for %d, path %s, force %x", cid, path, force)
+	logger.debug("fetch danmaku for %s, path %s, force %x", cid, path, force)
 
 	xml_file = os.path.join(path, "danmaku.xml")
 	url = DANMAKU_URL % cid
@@ -235,31 +248,34 @@ async def fetch_subtitle(sess, info, cid, path, force, stall = None):
 	return
 
 
-async def do_fix(sess, bv, path, stall = None, **kwargs):
+async def do_fix(sess, bv, path, /, stall = None, ignore = None, max_duration = None, **kwargs):
 	with core.locked_path(path, bv) as bv_root:
 		info = None
 		exception = None
 
-		stat = verify_bv(bv_root)
-		for k, v in stat.items():
-			if not v:
-				break
-		else:
+		ignore = ignore or ""
+		stat = verify_bv(bv_root, ignore)
+		if verify.check_result(stat):
 			logger.info("skip existing %s", bv)
 			return
 
 		logger.info("fixing %s", bv)
-		if not stat.get("info", False):
+		if stat.get("info", False) and stat.get("cover", True):
+			try:
+				with open(os.path.join(bv_root, "info.json"), 'r') as f:
+					info = json.load(f)
+			except Exception:
+				logger.exception("failed to load info.json")
+
+		if not info:
 			info = await fetch_info(sess, bv, stall)
 			save_info(info, bv_root)
 
-			stat = verify_bv(bv_root)
-			for k, v in stat.items():
-				if not v:
-					raise RuntimeError("failed to fix " + bv)
+			stat = verify_bv(bv_root, ignore)
+			if not verify.check_result(stat):
+				raise RuntimeError("failed to fix " + bv)
 
-		if not stat.get("cover", False):
-			info = info or await fetch_info(sess, bv, stall)
+		if not stat.get("cover", True):
 			try:
 				await fetch_cover(sess, info, bv_root, True, stall)
 			except Exception as e:
@@ -267,39 +283,37 @@ async def do_fix(sess, bv, path, stall = None, **kwargs):
 				exception = e
 
 		if not stat.get("graph", True):
-			info = info or await fetch_info(sess, bv, stall)
 			save_interactive(info.get("interactive"), bv_root)
 
-		for k, r in stat.items():
-			if r:
-				continue
+		if max_duration:
+			video_duration = info.get("duration", 0)
+			if video_duration > max_duration:
+				raise Exception("duration exceeds limit: %d/%d" % (video_duration, max_duration))
 
-			match = part_pattern.fullmatch(k)
-			if not match:
-				continue
-
-			logger.debug("fixing %s", k)
-			t = match.group(1)
-			cid = int(match.group(2))
-
-			with core.locked_path(bv_root, str(cid)) as part_root:
+		for cid, part_stat in stat.get("parts").items():
+			with core.locked_path(bv_root, cid) as part_root:
+				logger.info("%s %s", part_root, cid + str(part_stat))
+				request = ""
+				if not part_stat.get('V', True):
+					request += 'V'
+				if not part_stat.get('A', True):
+					request += 'A'
 				try:
-					if t == 'V':
-						await fetch_part(sess, bv, cid, part_root, True, stall, **kwargs)
-					elif t == 'D':
+					if request:
+						logger.debug("fixing %s %s", cid, request)
+						await fetch_part(sess, bv, cid, part_root, True, stall, request = request, **kwargs)
+					if not part_stat.get('D', True):
+						logger.debug("fixing %s D", cid)
 						await fetch_danmaku(sess, cid, part_root, True, stall)
-					elif t == 'S':
-						info = info or await fetch_info(sess, bv, stall)
+					if not part_stat.get('S', True):
+						logger.debug("fixing %s S", cid)
 						await fetch_subtitle(sess, info, cid, part_root, True, stall)
 				except Exception as e:
-					logger.exception("failed to fetch part %d", cid)
+					logger.exception("failed to fetch part %s", cid)
 					exception = e
 
-		stat = verify_bv(bv_root)
-		for k, v in stat.items():
-			if not v:
-				break
-		else:
+		stat = verify_bv(bv_root, ignore)
+		if verify.check_result(stat):
 			logger.info("fixed %s", bv)
 			return
 
@@ -309,47 +323,62 @@ async def do_fix(sess, bv, path, stall = None, **kwargs):
 		raise exception
 
 
-async def do_update(sess, bv, path, force, stall = None, **kwargs):
+async def do_update(sess, bv, path, force, /, stall = None, ignore = None, max_duration = None, **kwargs):
 	info = await fetch_info(sess, bv, stall)
 
 	logger.info("downloading %s, title %s", bv, info.get("title", ""))
 	exception = None
 
+	ignore = ignore or ""
 	with core.locked_path(path, bv) as bv_root:
 		save_info(info, bv_root)
 
 		try:
-			await fetch_cover(sess, info, bv_root, force, stall)
+			if 'C' not in ignore:
+				await fetch_cover(sess, info, bv_root, force, stall)
 		except Exception as e:
 			logger.exception("failed to fetch cover for %s", bv)
 			exception = e
 
-		if "interactive" in info:
+		if 'P' in ignore:
+			part_list = []
+		elif "interactive" in info:
 			part_list = iv_info.get("nodes")
 			save_interactive(info, bv_root)
 		else:
 			part_list = info.get("pages")
 
+		if max_duration:
+			video_duration = info.get("duration", 0)
+			if video_duration > max_duration:
+				raise Exception("duration exceeds limit: %d/%d" % (video_duration, max_duration))
+
 		finished_parts = 0
 		logger.debug("video parts %d", len(part_list))
 
 		for part in part_list:
-			cid = int(part.get("cid"))
-			logger.info("downloading %d, %s", cid, part.get("part", None) or part.get("title", ""))
-			with core.locked_path(bv_root, str(cid)) as part_root:
+			cid = str(part.get("cid", ""))
+			logger.info("downloading %s, %s", cid, part.get("part", None) or part.get("title", ""))
+			with core.locked_path(bv_root, cid) as part_root:
 
 				try:
-					await fetch_part(sess, bv, cid, part_root, force, stall, **kwargs)
+					request = ""
+					if 'V' not in ignore:
+						request += 'V'
+					if 'A' not in ignore:
+						request += 'A'
+					await fetch_part(sess, bv, cid, part_root, force, stall, request = request, **kwargs)
 
-					# always update danmaku
-					await fetch_danmaku(sess, cid, part_root, True, stall)
+					if 'D' not in ignore:
+						# always update danmaku
+						await fetch_danmaku(sess, cid, part_root, True, stall)
 
-					if info.get("subtitle"):
+					if 'S' not in ignore and info.get("subtitle"):
 						await fetch_subtitle(sess, info, cid, part_root, force, stall)
 
 					finished_parts += 1
 				except Exception as e:
-					logger.exception("failed to fetch part %d", cid)
+					logger.exception("failed to fetch part %s", cid)
 					exception = e
 
 	logger.info("finished %s, part %d/%d", bv, finished_parts, len(part_list))
@@ -360,7 +389,7 @@ async def do_update(sess, bv, path, force, stall = None, **kwargs):
 
 # methods
 
-async def download(sess, bv, video_root, mode, stall = None, **kwargs):
+async def download(sess, bv, video_root, mode, /, stall = None, **kwargs):
 	if mode == "fix" and not os.path.isfile(os.path.join(video_root, bv, "info.json")):
 		mode = "update"
 
@@ -379,7 +408,7 @@ async def batch_download(sess, bv_list, video_root, mode, **kwargs):
 	for bv in bv_list:
 		fetch_status = False
 		try:
-			assert(core.bv_pattern.fullmatch(bv))
+			assert(core.bvid_pattern.fullmatch(bv))
 			await download(sess, bv, video_root, mode, stall, **kwargs)
 			fetched_video += 1
 			fetch_status = True
@@ -406,11 +435,11 @@ async def main(args):
 
 	video_root = args.dir or runtime.subdir("video")
 	async with network.session() as sess:
-		await batch_download(sess, bv_list, video_root, mode = args.mode, prefer = args.prefer, reject = args.reject)
+		await batch_download(sess, bv_list, video_root, mode = args.mode, ignore = args.ignore, prefer = args.prefer, reject = args.reject)
 
 
 if __name__ == "__main__":
-	args = runtime.parse_args(("network", "auth", "dir", "bandwidth", "video_mode", "prefer"), [
+	args = runtime.parse_args(("network", "auth", "dir", "bandwidth", "video_mode", "video_ignore", "prefer"), [
 		(("inputs",), {"nargs" : '*'}),
 	])
 	asyncio.run(main(args))

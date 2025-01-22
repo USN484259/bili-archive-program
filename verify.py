@@ -104,16 +104,19 @@ def verify_cover(path, name, scan_files):
 	return True
 
 
-def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = None):
+def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, duration_tolerance = None):
 	if scan_files and not ffprobe_bin:
-		raise RuntimeError("ffprobe binary not found")
+		logger.warning("ffprobe binary not found")
+		scan_files = False
 
 	result = {
 		"info" : False,
+		"parts" : {}
 	}
 	try:
 		logger.debug("verify video %s, scan %s, tolerance %.1f", bv_root, scan_files, duration_tolerance or math.nan)
-
+		if ignore:
+			logger.debug("ignore %s", ignore)
 		logger.debug("loading video info")
 		with open(os.path.join(bv_root, "info.json"), 'r') as f:
 			bv_info = json.load(f)
@@ -129,8 +132,9 @@ def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = 
 			else:
 				logger.warning("cover not found")
 
-		part_list = None
-		if "interactive" in bv_info:
+		if 'P' in ignore:
+			part_list = []
+		elif "interactive" in bv_info:
 		# 	if not is_interactive(bv_info):
 		# 		raise RuntimeError("conflicting interactive video status")
 
@@ -151,42 +155,49 @@ def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = 
 				logger.warning("missing subtitles for %s", bv_info.get("bvid"))
 
 		for part in part_list:
-			cid = part.get("cid")
+			cid = str(part.get("cid", ""))
 			part_duration = part.get("duration", None)
 
-			logger.info("cid %d, %s, %.1f sec", cid, part.get("part", None) or part.get("title", ""), part_duration or math.nan)
+			logger.info("cid %s, %s, %.1f sec", cid, part.get("part", None) or part.get("title", ""), part_duration or math.nan)
 
-			video_name = "V:" + str(cid)
-			danmaku_name = "D:" + str(cid)
-			subtitle_name = "S:" + str(cid)
+			part_stat = {}
+			result["parts"][cid] = part_stat
+
 			if 'V' not in ignore:
-				result[video_name] = False
+				part_stat['V'] = 0
+			if 'A' not in ignore:
+				part_stat['A'] = 0
 			if 'D' not in ignore:
-				result[danmaku_name] = False
+				part_stat['D'] = 0
 
 			if subtitle_table:
-				subtitle = subtitle_table.get(str(cid), {}).get("subtitles", [])
+				subtitle = subtitle_table.get(cid, {}).get("subtitles", [])
 				logger.debug("subtitle count %d", len(subtitle))
 				if len(subtitle) > 0:
-					result[subtitle_name] = False
+					part_stat['S'] = 0
 
-			part_root = os.path.join(bv_root, str(cid))
+			part_root = os.path.join(bv_root, cid)
 			if not os.path.isdir(part_root):
 				logger.debug("part dir not exist")
 				continue
 
 			video_count = 0
 			audio_count = 0
-			subtitle_count = 0
 			no_audio = False
+			no_video = False
 
-			logger.debug("checking %d in %s", cid, part_root)
+			logger.debug("checking %s in %s", cid, part_root)
 			for filename in os.listdir(part_root):
 				logger.debug("file %s", filename)
 				ext = os.path.splitext(filename)[1].lower()
 
 				if ext == core.default_names.tmp_ext:
 					logger.debug("skip tmp file")
+					continue
+
+				if filename == core.default_names.novideo:
+					logger.info("found no-video stub")
+					no_video = True
 					continue
 
 				if filename == core.default_names.noaudio:
@@ -205,7 +216,7 @@ def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = 
 							continue
 
 					logger.debug("found danmaku")
-					result[danmaku_name] = True
+					part_stat['D'] += 1
 					continue
 
 				if ext == ".json":
@@ -229,17 +240,17 @@ def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = 
 						for i, sub in enumerate(subtitle):
 							if sub.get("lan") == lan:
 								del subtitle[i]
-								subtitle_count += 1
+								part_stat['S'] += 1
 								break
 						else:
 							logger.warning("subtitle not recorded %s", lan)
 
 					continue
 
-				if 'V' in ignore:
+				if 'V' in ignore and 'A' in ignore:
 					continue
 
-				if ext == ".m4v":
+				if ext == ".m4v" and 'V' not in ignore:
 					logger.debug("type: video")
 					if scan_files:
 						vc, ac = verify_media(os.path.join(part_root, filename), part_duration, duration_tolerance)
@@ -251,7 +262,7 @@ def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = 
 					video_count += 1
 					continue
 
-				if ext == ".m4a":
+				if ext == ".m4a" and 'A' not in ignore:
 					logger.debug("type: audio")
 					if scan_files:
 						vc, ac = verify_media(os.path.join(part_root, filename), part_duration, duration_tolerance)
@@ -278,20 +289,29 @@ def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = 
 
 				logger.debug("unknown type %s", ext)
 
-			logger.info("video_count %d, audio_count %d, subtitle_count %d", video_count, audio_count, subtitle_count)
-			if video_count > 0 and (no_audio or audio_count > 0):
-				result[video_name] = True
-			elif 'V' not in ignore:
-				logger.warning("missing media files")
+			logger.info("video_count %d, audio_count %d", video_count, audio_count)
 
-			if 'D' not in ignore and not result[danmaku_name]:
+			if 'V' not in ignore:
+				if video_count > 0:
+					part_stat['V'] = video_count
+				elif no_video:
+					del part_stat['V']
+				else:
+					logger.warning("missing video files")
+
+			if 'A' not in ignore:
+				if audio_count > 0:
+					part_stat['A'] = audio_count
+				elif no_audio:
+					del part_stat['A']
+				else:
+					logger.warning("missing audio files")
+
+			if 'D' not in ignore and not part_stat['D']:
 				logger.warning("missing danmaku file")
 
-			if subtitle_name in result:
-				if len(subtitle) == 0:
-					result[subtitle_name] = True
-				else:
-					logger.warning("missing subtitle %d/%d", len(subtitle), subtitle_count)
+			if not part_stat.get('S', True):
+				logger.warning("missing subtitle")
 
 		logger.debug("verify done for %s", bv_info.get("bvid"))
 		result["info"] = True
@@ -300,6 +320,20 @@ def verify_bv(bv_root, *, ignore = "", scan_files = False, duration_tolerance = 
 
 	logger.debug(result)
 	return result
+
+
+def check_result(stat):
+	def recursive_check(obj):
+		if isinstance(obj, dict):
+			res = True
+			for k, v in obj.items():
+				res &= recursive_check(v)
+			return res
+		else:
+			return bool(obj)
+
+	return recursive_check(stat)
+
 
 def main(args):
 	video_root = args.dir or runtime.subdir("video")
@@ -320,12 +354,8 @@ def main(args):
 	for bv in bv_list:
 		bv_root = os.path.join(video_root, bv)
 		result = verify_bv(bv_root, ignore = args.ignore, scan_files = args.scan, duration_tolerance = tolerance)
-		res = True
-		for k, v in result.items():
-			if not v:
-				res = False
-				break
-		else:
+		res = check_result(result)
+		if res:
 			verified_count += 1
 
 		runtime.report("video", res, bv)

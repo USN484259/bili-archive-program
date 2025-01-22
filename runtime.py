@@ -39,6 +39,9 @@ standard_args = {
 	"video_mode": [
 		(("-m", "--mode"), {"choices" : ["fix", "update", "force"], "default": "fix"}),
 	],
+	"video_ignore": [
+		(("--ignore",), {}),
+	],
 	"prefer": [
 		(("--prefer",), {}),
 		(("--reject",), {}),
@@ -158,7 +161,7 @@ def subdir(key):
 def list_bv(path):
 	bv_list = []
 	for f in os.listdir(path):
-		if core.bv_pattern.fullmatch(f):
+		if core.bvid_pattern.fullmatch(f):
 			bv_list.append(f)
 
 	return bv_list

@@ -20,7 +20,10 @@
 	<ul id="parts"></ul>
 
 	<div class="info">
-		<button id="suggest">show suggestions</button>
+		<span>
+			<button id="suggest">show suggestions</button>
+		</span>
+		<span>&nbsp;</span>
 		<span id="bvid"></span>
 	</div>
 	<table id="suggestions" hidden>
@@ -209,7 +212,6 @@ function show_suggestions(resp) {
 		action_bvid.setAttribute("name", "bvid")
 		action_bvid.setAttribute("value", info.bvid)
 		action_form.appendChild(action_bvid)
-
 
 		let action_button = document.createElement("input")
 		action_button.setAttribute("type", "submit")

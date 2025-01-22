@@ -15,9 +15,10 @@ from constants import *
 DEFAULT_NAME_MAP = {
 	"danmaku": "danmaku.xml",
 	"tmp_ext": ".tmp",
+	"novideo": ".novideo",
 	"noaudio": ".noaudio",
 	"hls_index": "index.m3u8",
-	"rotate_postfix": "_rotate.zip",
+	"rotate_postfix": "-rotate.zip",
 	"backup_postfix": ".bak",
 }
 
@@ -109,8 +110,9 @@ class staged_file:
 			with locked_file(rotate_name, "r+b") as arch_fd:
 				with zipfile.ZipFile(arch_fd, mode = "a") as archive:
 					stat = os.stat(src_fd.fileno())
+					file_name = os.path.split(self.filename)[1]
 					file_time = time.gmtime(stat.st_mtime)
-					file_info = zipfile.ZipInfo(self.filename, file_time)
+					file_info = zipfile.ZipInfo("%s-%d" % (file_name, int(stat.st_mtime)), file_time)
 					with archive.open(file_info, "w") as sink:
 						buffer = bytearray(0x1000)
 						while True:

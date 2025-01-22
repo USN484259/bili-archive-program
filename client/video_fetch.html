@@ -7,8 +7,16 @@
 	<h1 id="title"><a href="/cache/index.html">Cached Videos</a></h1>
 
 	<form id="fetch_form" method="POST" action="/api/video_cache">
-		<label for="fetch_bv">Cache new video </label>
-		<input name="bvid" id="fetch_bv" autofocus />
+		<span>
+			<label for="bv_input">Cache new video </label>
+			<input name="bvid" id="bv_input" required autofocus />
+		</span>
+		<span class="right">
+			<label for="max_duration">max duration </label>
+			<input type=number name="max_duration" id="max_duration" min="0"/>
+		</span>
+		<input type="submit" value="schedule" />
+		<output id="msg"></output>
 	</form>
 	<table>
 		<thead>
@@ -40,6 +48,14 @@ thead {
 }
 th, td {
 	padding: 10px;
+}
+
+#max_duration {
+	width: 60px;
+}
+
+.right {
+	float: right;
 }
 
 thead th:nth-child(1) {
@@ -107,6 +123,28 @@ function update_task(task_map, task_info, bv_info) {
 	append_time(tr_elem, task_info, "start_time")
 	append_time(tr_elem, task_info, "stop_time")
 
+	// action
+	let action_cmd = null
+	if (task_info.status.startsWith("fail"))
+		action_cmd = "retry"
+
+	if (action_cmd) {
+		let action_elem = document.createElement("td")
+		let button_elem = document.createElement("input")
+
+		button_elem.setAttribute("type", "button")
+		button_elem.setAttribute("value", action_cmd)
+		button_elem.addEventListener("click", (ev) => {
+			input_elem = document.getElementById("bv_input")
+			input_elem.value = bvid
+			input_elem.scrollIntoView({"behavior": "smooth", "block": "center"})
+			input_elem.focus()
+		})
+
+		action_elem.appendChild(button_elem)
+		tr_elem.appendChild(action_elem)
+	}
+
 	let old_elem = task_map[bvid]
 	let table_elem = document.getElementById("tasklist")
 
@@ -127,6 +165,8 @@ function build_tasklist(args) {
 	fetch(url).then((resp) => resp.json()).then((stats) => {
 		console.log(stats)
 		let task_list = stats.record.concat(stats.queue)
+		if ("running" in stats)
+			task_list.push(stats.running)
 		Promise.all(
 			task_list.map(
 				(task) => fetch(cache_root + task.bvid + "/info.json").then((resp) => resp.json()).catch((err) => {})
@@ -151,15 +191,26 @@ addEventListener("DOMContentLoaded", () => {
 	}
 	document.forms["fetch_form"].addEventListener("submit", (ev) => {
 		ev.preventDefault();
+		form_data = new FormData(ev.target)
+
+		for (let [name, value] of Array.from(form_data.entries())) {
+			if (value === '') form_data.delete(name);
+		}
+
 		fetch(ev.target.action, {
 			method: "POST",
-			body: new URLSearchParams(new FormData(ev.target))
+			body: new URLSearchParams(form_data)
 		}).then((resp) => {
-			ev.target.reset();
-			build_tasklist(record);
-		});
+			msg_elem = document.getElementById("msg")
+			if (resp.ok) {
+				ev.target.reset();
+				msg_elem.value = ""
+				build_tasklist(record);
+			} else {
+				msg_elem.value = resp.statusText
+			}
+		})
 	});
-
 
 	build_tasklist(record);
 	setInterval(build_tasklist, 4 * 1000, record);
