@@ -63,6 +63,9 @@ class BVDownloader:
 		return task
 
 	def update(self):
+		if not self.queue:
+			return
+
 		try:
 			if self.pipe[0].poll():
 				self.msg = str(self.pipe[0].recv())
@@ -116,6 +119,7 @@ class BVDownloader:
 		for rec in self.queue:
 			if rec["bvid"] == bvid:
 				if self.task is not None and self.queue[0] is rec:
+					assert(rec["status"] == "running")
 					logger.info("cancelling task %s", bvid)
 					self.task.terminate()
 				rec["status"] = "cancelled"
@@ -135,7 +139,7 @@ class BVDownloader:
 			while (i > 0):	# reverse iteration
 				i -= 1
 				rec = rec_list[i]
-				if rec.get("create_time", 0) <= since and rec.get("start_time", 0) <= since and rec.get("stop_time", 0) <= since:
+				if rec.get("create_time", 0) < since and rec.get("start_time", 0) < since and rec.get("stop_time", 0) < since:
 					break
 				result.append(rec)
 
@@ -149,7 +153,7 @@ class BVDownloader:
 		}
 
 		if self.queue and self.queue[0].get("status", "") == "running":
-			result["running"] = self.queue[0]
+			result["running"] = self.queue[0].get("start_time", 0)
 
 		return result
 
@@ -281,4 +285,4 @@ if __name__ == "__main__":
 	os.makedirs(cache_path, exist_ok = True)
 
 	with BVPlayServer(bv_play_handler, args.path, max_size, args.max_duration, args.args) as server:
-		server.serve_forever(poll_interval = 2)
+		server.serve_forever(poll_interval = 10)

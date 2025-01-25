@@ -98,9 +98,9 @@ def find_best_url_dash(info, request, *, prefer, reject):
 	result = {}
 	components = ""
 	def fill_url(name, ext):
-		url_info = find_best(info.get(name, []), prefer, reject)
+		url_info = find_best(info.get(name) or [], prefer, reject)
 		if not url_info:
-			norej_info = find_best(info.get(name, []), prefer)
+			norej_info = find_best(info.get(name) or [], prefer)
 			if norej_info:
 				logger.warning("bad reject: %s", reject)
 				url_info = norej_info
@@ -212,9 +212,9 @@ async def fetch_part(sess, bvid, cid, path, force, /, stall = None, *, request =
 		raise exception
 
 	if 'V' in request and 'V' not in components:
-		core.touch(core.default_names.novideo)
+		core.touch(os.path.join(path, core.default_names.novideo))
 	if 'A' in request and 'A' not in components:
-		core.touch(core.default_names.noaudio)
+		core.touch(os.path.join(path, core.default_names.noaudio))
 
 
 async def fetch_cover(sess, info, path, force, stall = None):
@@ -252,6 +252,7 @@ async def do_fix(sess, bv, path, /, stall = None, ignore = None, max_duration = 
 	with core.locked_path(path, bv) as bv_root:
 		info = None
 		exception = None
+		fetched_info = False
 
 		ignore = ignore or ""
 		stat = verify_bv(bv_root, ignore)
@@ -260,27 +261,41 @@ async def do_fix(sess, bv, path, /, stall = None, ignore = None, max_duration = 
 			return
 
 		logger.info("fixing %s", bv)
-		if stat.get("info", False) and stat.get("cover", True):
+		if stat.get("info", False):
 			try:
 				with open(os.path.join(bv_root, "info.json"), 'r') as f:
 					info = json.load(f)
 			except Exception:
 				logger.exception("failed to load info.json")
 
-		if not info:
-			info = await fetch_info(sess, bv, stall)
-			save_info(info, bv_root)
+		while not fetched_info:
+			if not info:
+				info = await fetch_info(sess, bv, stall)
+				save_info(info, bv_root)
+				fetched_info = True
 
+			# fetch-cover may fail due to changed cover upstream
+			# re-fetching info from upstream and try again
+			if not stat.get("cover", True):
+				try:
+					await fetch_cover(sess, info, bv_root, True, stall)
+					break
+				except Exception as e:
+					logger.exception("failed to fetch cover for %s", bv)
+					if fetched_info:
+						exception = e
+						break
+					else:
+						logger.debug("dropping info and re-fetch")
+						info = None
+			else:
+				break
+
+		if fetched_info:
 			stat = verify_bv(bv_root, ignore)
 			if not verify.check_result(stat):
 				raise RuntimeError("failed to fix " + bv)
 
-		if not stat.get("cover", True):
-			try:
-				await fetch_cover(sess, info, bv_root, True, stall)
-			except Exception as e:
-				logger.exception("failed to fetch cover for %s", bv)
-				exception = e
 
 		if not stat.get("graph", True):
 			save_interactive(info.get("interactive"), bv_root)

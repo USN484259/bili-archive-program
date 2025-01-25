@@ -17,9 +17,6 @@ video {
 	</style>
 	<script>
 
-const split_pattern = new RegExp(".+[.]([^.]+)")
-
-
 function load_js(url, func, path) {
 	let scriptTag = document.createElement('script');
 	scriptTag.src = url;
@@ -70,7 +67,7 @@ function play_video(path) {
 				continue;
 
 			let name = entry.name;
-			let ext = name.match(split_pattern)[1];
+			let ext = name.split('.').pop()
 			console.log(ext, name);
 
 			if (ext == "flv") {

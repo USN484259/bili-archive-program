@@ -22,7 +22,7 @@ logger = logging.getLogger("bili_arch.bili_proxy")
 
 url_whitelist = (
 	(re.compile(r"^https://api[.]bilibili[.]com/x/web-interface/archive/related([?].+)?$"), 2),
-	(re.compile(r"^http[s]?://[^/]+[.]hdslb[.]com/.+$"), 0),
+	(re.compile(r"^http[s]?://[^/]+[.]hdslb[.]com/.+$"), None),
 )
 
 
@@ -45,19 +45,19 @@ class bili_proxy_handler(HttpResponseMixin, FcgiHandler):
 			url = query["target"][0]
 
 			logger.debug("%s %s", method, url)
-			next_stall_time = None
-			for regex, stall_time in url_whitelist:
+			throttle_time = None
+			for regex, throttle in url_whitelist:
 				if regex.match(url):
-					next_stall_time = stall_time
-					logger.debug("target stall time %d", stall_time)
+					throttle_time = throttle
+					logger.debug("target throttle time %d", throttle)
 					break
 			else:
 				logger.warning("forbidden target %s", url)
 				return self.send_response(403)
 
 			try:
-				if next_stall_time > 0:
-					self.server.stall(next_stall_time)
+				if not self.server.throttle(throttle_time):
+					return self.send_response(429)
 
 				if method == "POST":
 					content_type = self.environ.get("CONTENT_TYPE", "application/json")
@@ -87,21 +87,16 @@ class BiliProxyServer(FcgiServer):
 	def __init__(self, handler, *, timeout = 30, cookies = {}):
 		super().__init__(handler)
 		self.sess = httpx.Client(headers = constants.USER_AGENT, timeout = timeout, cookies = cookies, follow_redirects = True)
-		self.stall_time = 0
-		self.last_time = 0
+		self.throttle_until = 0
 
-
-	def stall(self, next_stall_time):
+	def throttle(self, throttle_time):
+		if throttle_time is None:
+			return True
 		cur_time = time.monotonic()
-		time_diff = cur_time - self.last_time
-		time_wait = self.stall_time - time_diff
-		logger.debug("stall %.1f sec",  max(time_wait, 0))
-		if time_diff > 0 and time_wait > 0:
-			time.sleep(time_wait)
-			cur_time = time.monotonic()
-		self.last_time = cur_time
-		self.stall_time = next_stall_time
-
+		if cur_time < self.throttle_until:
+			return False
+		self.throttle_until = cur_time + throttle_time
+		return True
 
 # entrance
 
@@ -109,4 +104,4 @@ if __name__ == "__main__":
 	logging.basicConfig(level = logging.DEBUG, format = constants.LOG_FORMAT, stream = sys.stderr)
 
 	with BiliProxyServer(bili_proxy_handler) as server:
-		server.serve_forever(poll_interval = 5)
+		server.serve_forever(poll_interval = 600)

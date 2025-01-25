@@ -86,87 +86,92 @@ const cache_root = "/cache/"
 const player_url = "/video_page.html";
 let localtime = new Intl.DateTimeFormat(undefined, {dateStyle: "medium", timeStyle: "medium"})
 
-function append_time(tr_elem, item, key) {
-	let td_elem = document.createElement("td")
-	let datetime = item[key]
-	if (datetime)
-		td_elem.append(localtime.format(new Date(datetime)))
 
-	tr_elem.appendChild(td_elem)
-}
+class TaskList {
+	map;
+	last_update_time;
+	running_timestamp;
+	constructor() {
+		this.map = {}
+		this.last_update_time = null
+		this.running_timestamp = null
+		this.update()
+	}
+	static append_time(tr_elem, item, key) {
+		let td_elem = document.createElement("td")
+		let datetime = item[key]
+		if (datetime)
+			td_elem.append(localtime.format(new Date(datetime)))
 
-function update_task(task_map, task_info, bv_info) {
-	let bvid = task_info.bvid
-	let tr_elem = document.createElement("tr")
-	tr_elem.id = bvid
-
-	// bvid
-	let bvid_elem = document.createElement("td")
-	let a_elem = document.createElement("a")
-	let url = player_url + "?path=" + cache_root + bvid
-	a_elem.setAttribute("href", url)
-
-	let title = bvid
-	try {
-		title = bv_info.title
-	} catch (err) {}
-	a_elem.append(title)
-	bvid_elem.append(a_elem)
-	tr_elem.appendChild(bvid_elem)
-
-	// status
-	let stat_elem = document.createElement("td")
-	stat_elem.append(task_info.status)
-	tr_elem.appendChild(stat_elem)
-
-	append_time(tr_elem, task_info, "create_time")
-	append_time(tr_elem, task_info, "start_time")
-	append_time(tr_elem, task_info, "stop_time")
-
-	// action
-	let action_cmd = null
-	if (task_info.status.startsWith("fail"))
-		action_cmd = "retry"
-
-	if (action_cmd) {
-		let action_elem = document.createElement("td")
-		let button_elem = document.createElement("input")
-
-		button_elem.setAttribute("type", "button")
-		button_elem.setAttribute("value", action_cmd)
-		button_elem.addEventListener("click", (ev) => {
-			input_elem = document.getElementById("bv_input")
-			input_elem.value = bvid
-			input_elem.scrollIntoView({"behavior": "smooth", "block": "center"})
-			input_elem.focus()
-		})
-
-		action_elem.appendChild(button_elem)
-		tr_elem.appendChild(action_elem)
+		tr_elem.appendChild(td_elem)
 	}
 
-	let old_elem = task_map[bvid]
-	let table_elem = document.getElementById("tasklist")
+	update_row(task_info, bv_info) {
+		let bvid = task_info.bvid
+		let tr_elem = document.createElement("tr")
+		tr_elem.id = bvid
 
-	if (old_elem) {
-		console.assert(table_elem == old_elem.parentNode)
-		old_elem.replaceWith(tr_elem)
+		// bvid
+		let bvid_elem = document.createElement("td")
+		let a_elem = document.createElement("a")
+		let url = player_url + "?path=" + cache_root + bvid
+		a_elem.setAttribute("href", url)
+
+		let title = bvid
+		try {
+			title = bv_info.title
+		} catch (err) {}
+		a_elem.append(title)
+		bvid_elem.append(a_elem)
+		tr_elem.appendChild(bvid_elem)
+
+		// status
+		let stat_elem = document.createElement("td")
+		stat_elem.append(task_info.status)
+		tr_elem.appendChild(stat_elem)
+
+		this.constructor.append_time(tr_elem, task_info, "create_time")
+		this.constructor.append_time(tr_elem, task_info, "start_time")
+		this.constructor.append_time(tr_elem, task_info, "stop_time")
+
+		// action
+		let action_cmd = null
+		if (task_info.status.startsWith("fail"))
+			action_cmd = "retry"
+
+		if (action_cmd) {
+			let action_elem = document.createElement("td")
+			let button_elem = document.createElement("input")
+
+			button_elem.setAttribute("type", "button")
+			button_elem.setAttribute("value", action_cmd)
+			button_elem.addEventListener("click", (ev) => {
+				input_elem = document.getElementById("bv_input")
+				input_elem.value = bvid
+				input_elem.scrollIntoView({"behavior": "smooth", "block": "center"})
+				input_elem.focus()
+			})
+
+			action_elem.appendChild(button_elem)
+			tr_elem.appendChild(action_elem)
+		}
+
+		let old_elem = this.map[bvid]
+		let table_elem = document.getElementById("tasklist")
+
+		if (old_elem) {
+			console.assert(table_elem === old_elem.parentNode)
+			old_elem.replaceWith(tr_elem)
+		}
+		table_elem.insertBefore(tr_elem, table_elem.firstElementChild)
+
+		this.map[bvid] = tr_elem
 	}
-	table_elem.insertBefore(tr_elem, table_elem.firstElementChild)
 
-	task_map[bvid] = tr_elem
-}
-
-function build_tasklist(args) {
-	url = new URL(cache_api, document.location)
-	if (args.last_update_time)
-		url.search = new URLSearchParams({"since": args.last_update_time}).toString()
-
-	fetch(url).then((resp) => resp.json()).then((stats) => {
+	update_list(stats) {
 		console.log(stats)
 		let task_list = stats.record.concat(stats.queue)
-		if ("running" in stats)
-			task_list.push(stats.running)
+
 		Promise.all(
 			task_list.map(
 				(task) => fetch(cache_root + task.bvid + "/info.json").then((resp) => resp.json()).catch((err) => {})
@@ -177,18 +182,31 @@ function build_tasklist(args) {
 				let task = task_list[i]
 				let info = info_list[i]
 
-				update_task(args.map, task, info)
+				this.update_row(task, info)
 			}
-			args.last_update_time = stats.timestamp
-		});
-	});
-}
+		})
+	}
+	update() {
+		let url = new URL(cache_api, document.location)
+		if (this.running_timestamp)
+			url.search = new URLSearchParams({"since": this.running_timestamp}).toString()
+		else if (this.last_update_time)
+			url.search = new URLSearchParams({"since": this.last_update_time}).toString()
 
+		fetch(url).then((resp) => resp.json()).then((stats) => {
+			if ("running" in stats)
+				this.running_timestamp = stats.running
+			else
+				this.running_timestamp = null
+
+			this.update_list(stats)
+			this.last_update_time = stats.timestamp
+		});
+	}
+};
 
 addEventListener("DOMContentLoaded", () => {
-	let record = {
-		"map": {}
-	}
+	let task_list = new TaskList()
 	document.forms["fetch_form"].addEventListener("submit", (ev) => {
 		ev.preventDefault();
 		form_data = new FormData(ev.target)
@@ -205,15 +223,15 @@ addEventListener("DOMContentLoaded", () => {
 			if (resp.ok) {
 				ev.target.reset();
 				msg_elem.value = ""
-				build_tasklist(record);
+				task_list.update()
 			} else {
 				msg_elem.value = resp.statusText
 			}
 		})
 	});
 
-	build_tasklist(record);
-	setInterval(build_tasklist, 4 * 1000, record);
+	task_list.update()
+	setInterval(() => {task_list.update()}, 4 * 1000)
 });
 	</script>
 </body>
