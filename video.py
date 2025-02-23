@@ -181,7 +181,7 @@ async def fetch_part(sess, bvid, cid, path, force, /, stall = None, *, request =
 		url_info, components = find_best_url_dash(play_info.get("dash"), request, prefer = prefer, reject = reject)
 	elif "durl" in play_info:
 		logger.debug("durl format")
-		url_info = find_best_url_durl(play_info.get("durl"), prefer = prefer, reject = reject)
+		url_info, components = find_best_url_durl(play_info.get("durl"), prefer = prefer, reject = reject)
 	else:
 		raise RuntimeError("unknown URL format")
 

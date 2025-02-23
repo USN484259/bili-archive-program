@@ -146,7 +146,7 @@ class TaskList {
 			button_elem.setAttribute("type", "button")
 			button_elem.setAttribute("value", action_cmd)
 			button_elem.addEventListener("click", (ev) => {
-				input_elem = document.getElementById("bv_input")
+				let input_elem = document.getElementById("bv_input")
 				input_elem.value = bvid
 				input_elem.scrollIntoView({"behavior": "smooth", "block": "center"})
 				input_elem.focus()

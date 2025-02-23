@@ -1,2 +1,4 @@
-bilibili-api-python
-
+httpx
+fastcgi[webserver]
+watchdog[webserver]
+websockets[live_danmaku]
