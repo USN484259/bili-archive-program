@@ -57,4 +57,4 @@ if __name__ == "__main__":
 	args = parser.parse_args()
 
 	with LiveStatusServer(live_status_handler, args.path, args.interval) as server:
-		server.serve_forever(poll_interval = 5)
+		server.serve_forever(poll_interval = 600)

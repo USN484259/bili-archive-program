@@ -8,7 +8,7 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 ## 工具模块使用说明
 
 
-### 命令概述
+### 模块概述
 
 + video.py	下载视频，更新本地视频存档
 + favlist.py	下载收藏夹信息和视频
@@ -19,7 +19,7 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 
 ### 常见参数说明
 
-每个命令的完整参数列表请使用 `<模块> --help` 查看
+每个模块的完整参数列表请使用 `<模块> --help` 查看
 
 
 |	参数	|	短参数	|	功能	|	备注	|
@@ -62,14 +62,14 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 
 ### 工具模块
 
-|	项目		|	OS	|	Python3.8+	|	httpx		|	ffprobe		|	websockets	|
-|	----		|	----	|	----		|	----		|	----		|	----		|
-|	video.py	|	UNIX	|	M		|	M		|			|			|
-|	favlist.py	|	UNIX	|	M		|	M		|			|			|
-|	user.py		|	UNIX	|	M		|	M		|			|			|
-|	verify.py	|	any	|	M		|			|	O		|			|
-|	live_rec.py	|	UNIX	|	M		|	M		|			|	O		|
-|	monitor.py	|	UNIX	|	M		|	M		|			|			|
+|	项目		|	OS	|	Python3.8+	|	httpx		|	ffprobe		|	websockets	|	brotli	|
+|	----		|	----	|	----		|	----		|	----		|	----		|	----	|
+|	video.py	|	UNIX	|	M		|	M		|			|			|		|
+|	favlist.py	|	UNIX	|	M		|	M		|			|			|		|
+|	user.py		|	UNIX	|	M		|	M		|			|			|		|
+|	verify.py	|	any	|	M		|			|	O		|			|		|
+|	live_rec.py	|	UNIX	|	M		|	M		|			|	O		|	O	|
+|	monitor.py	|	UNIX	|	M		|	M		|			|			|		|
 
 ### http后端
 
@@ -108,6 +108,17 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 
 
 ## 参考部署
+
+### 直播录制
+
+```sh
+# 使用`cron(8)`开机启动，在tmux session中启动直播间录制
+$ crontab -l
+SHELL=/bin/bash
+@reboot tmux new-session -d -s bili -c /PATH/TO/RECORDING/DIR "./monitor.py -v --rec-log -c rec_config.json -u bili-credential.txt -r bili-arch -i 20 /srv/http/tmp/bili-monitor.socket"
+```
+
+### http 服务
 
 ```sh
 # 安装软件包
@@ -160,6 +171,32 @@ sudo systemctl daemon-reload
 sudo systemctl restart lighttpd
 
 ```
+
+### 直播通知
+
+*~/bin/bili_live_notify*
+```sh
+#!/bin/sh
+REC_SERVER=localhost
+cd /PATH/TO/CODE
+exec desktop/live_notify.py -c config/rec_config.json http://$REC_SERVER/api/live_status
+```
+
+
+*~/.config/autostart/bili_live_notify.desktop*
+```ini
+[Desktop Entry]
+Type=Application
+Exec=$HOME/bin/bili_live_notify
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name[en_US]=bili_live_notify
+Name=bili_live_notify
+Comment[en_US]=Bilibili Live Notifier
+Comment=Bilibili Live Notifier
+```
+
 
 ## 引用
 

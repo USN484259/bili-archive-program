@@ -64,7 +64,7 @@ class HttpResponseMixin:
 		for header in extra_headers:
 			self["stdout"].write(header.encode() + b"\r\n")
 		self["stdout"].write(b"\r\n")
-		if data:
+		if data is not None:
 			if callable(data):
 				for chunk in data():
 					self["stdout"].write(chunk)

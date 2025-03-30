@@ -187,5 +187,5 @@ class ZipAccessServer(FcgiThreadingServer):
 			self.zip_cache.flush()
 
 with ZipAccessServer(zip_access_handler) as server:
-	server.serve_forever()
+	server.serve_forever(poll_interval = 60)
 

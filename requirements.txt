@@ -1,4 +1,2 @@
+python>=3.8
 httpx
-fastcgi[webserver]
-watchdog[webserver]
-websockets[live_danmaku]
