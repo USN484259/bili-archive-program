@@ -240,19 +240,8 @@ async def main(args):
 	signal.signal(signal.SIGUSR2, sig_restart)
 
 	if args.socket:
-		import socket
 		try:
-			logger.info("creating unix socket %s", args.socket)
-			# https://stackoverflow.com/questions/11781134/change-linux-socket-file-permissions
-			sock = socket.socket(socket.AF_UNIX)
-			os.fchmod(sock.fileno(), 0o600)
-			try:
-				os.unlink(args.socket)
-			except FileNotFoundError:
-				pass
-			sock.bind(args.socket)
-			os.chmod(args.socket, 0o666)
-
+			sock = network.create_unix_socket(args.socket, mode = 0o666)
 			server = await asyncio.start_unix_server(on_connected, sock = sock, start_serving = True)
 		except Exception:
 			logger.exception("failed to create unix socket")

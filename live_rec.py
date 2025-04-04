@@ -6,6 +6,8 @@ import json
 import asyncio
 import zipfile
 import logging
+import functools
+from contextlib import suppress
 
 import core
 import runtime
@@ -63,28 +65,6 @@ async def get_live_url(sess, rid):
 	return info
 
 
-async def fetch_stream(sess, url, sink_func, *args):
-	sink = None
-	if not callable(sink_func):
-		sink = sink_func
-
-	try:
-		async with sess.stream("GET", url) as resp:
-			logger.debug(resp)
-			resp.raise_for_status()
-
-			async for chunk in resp.aiter_bytes():
-				if not sink:
-					logger.debug("calling sink_func")
-					sink = sink_func(*args)
-
-				sink.write(chunk)
-	finally:
-		if callable(sink_func) and sink:
-			logger.debug("closing sink")
-			sink.close()
-
-
 def find_best_url(info, *, prefer = "", reject = ""):
 	# preference priority low-to-high
 	url_streams = info.get("playurl_info").get("playurl").get("stream")
@@ -132,7 +112,7 @@ async def record_flv(sess, info, name_prefix):
 	for url_info in info.get("url_info"):
 		try:
 			url = url_info.get("host") + info.get("base_url") + url_info.get("extra")
-			await fetch_stream(sess, url, on_file_open, file_name, "xb")
+			await network.fetch_stream(sess, url, on_file_open, file_name, "xb")
 		except Exception:
 			logger.exception("exception on record_flv")
 			if connected:
@@ -147,9 +127,6 @@ async def record_hls(sess, info, name_prefix):
 	cur_url_index = 0
 	with core.locked_file(name_prefix + ".zip", "x+b") as zip_file:
 		with zipfile.ZipFile(zip_file, mode = "w") as archive:
-			async def req_func(buffer, url, sess):
-				return await fetch_stream(sess, url, buffer)
-
 			m3u = hls.M3u()
 			stall = None
 			try:
@@ -158,7 +135,7 @@ async def record_hls(sess, info, name_prefix):
 					url_path = get_url_path(info.get("base_url"))
 					idx_url = url_info.get("host") + info.get("base_url") + url_info.get("extra")
 					try:
-						res_list = await m3u.async_update(req_func, idx_url, sess)
+						res_list = await m3u.async_update(functools.partial(network.fetch_stream, sess), idx_url)
 						if res_list is None:
 							break
 						file_time = time.gmtime()
@@ -166,7 +143,7 @@ async def record_hls(sess, info, name_prefix):
 							file_info = zipfile.ZipInfo(name, file_time)
 							url = url_info.get("host") + url_path + name + '?' + url_info.get("extra")
 							logger.debug("%s: %s", name, url)
-							await fetch_stream(sess, url, archive.open, file_info, "w")
+							await network.fetch_stream(sess, url, archive.open, file_info, "w")
 
 						last_url_index = cur_url_index
 						if not stall:
@@ -190,7 +167,7 @@ async def record_hls(sess, info, name_prefix):
 					m3u.dump(f)
 
 
-async def record_danmaku(rid, path):
+async def record_danmaku(rid, path, *, fetch_images = True):
 	from live_danmaku import LiveDanmaku
 
 	danmaku_file_name = os.path.join(path, "danmaku.json")
@@ -202,16 +179,17 @@ async def record_danmaku(rid, path):
 				for ev in ev_list:
 					ev["timestamp"] = timestamp
 					f.write(json.dumps(ev, ensure_ascii = False) + '\n')
-				if ev.get("cmd", "") == "DANMU_MSG":
-					info = ev.get("info")
-					if isinstance(info, list) and len(info):
-						for obj in info[0]:
-							if not isinstance(obj, dict):
-								continue
-							img_name = obj.get("emoticon_unique")
-							img_url = obj.get("url")
-							if img_name and img_url:
-								await fetcher.schedule(path, img_name + ".png", img_url)
+
+					if fetch_images and ev.get("cmd", "") == "DANMU_MSG":
+						info = ev.get("info")
+						if isinstance(info, list) and len(info):
+							for obj in info[0]:
+								if not isinstance(obj, dict):
+									continue
+								img_name = obj.get("emoticon_unique")
+								img_url = obj.get("url")
+								if img_name and img_url:
+									await fetcher.schedule(path, img_name + ".png", img_url)
 
 
 async def record(sess, rid, path, *, do_record_danmaku = True, prefer = None, reject = None):
@@ -276,11 +254,10 @@ async def record(sess, rid, path, *, do_record_danmaku = True, prefer = None, re
 		logger.exception("exception in record")
 		raise
 	finally:
-		if danmaku_task:
-			try:
+		if danmaku_task is not None:
+			with suppress(asyncio.CancelledError):
 				danmaku_task.cancel()
-			except:
-				pass
+
 
 # entrance
 

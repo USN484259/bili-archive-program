@@ -11,6 +11,7 @@ import argparse
 import multiprocessing
 from collections import deque
 from urllib.parse import parse_qs
+from contextlib import suppress
 from fcgi_server import FcgiServer, HttpResponseMixin
 from fastcgi import FcgiHandler
 
@@ -169,52 +170,48 @@ class bv_play_handler(HttpResponseMixin, FcgiHandler):
 				query_str = self.environ.get("QUERY_STRING")
 				since = 0
 				if query_str:
-					query = parse_qs(query_str, strict_parsing = True)
-					try:
-						since = int(query.get("since")[0])
-					except (ValueError, IndexError):
-						pass
+					with suppress(ValueError, KeyError, IndexError):
+						query = parse_qs(query_str, strict_parsing = True)
+						since = int(query["since"][0])
+
 				result = self.server.status(since)
 				return self.send_response(200, "application/json", result)
 
 			else:	# POST
-				query_str = self["stdin"].read().decode("utf-8")
-				logger.info("query: %s", query_str)
-				query = parse_qs(query_str, keep_blank_values = True, strict_parsing = True)
+				try:
+					query_str = self["stdin"].read().decode("utf-8")
+					logger.info("query: %s", query_str)
 
-				if not query:
-					return self.send_response(400)
-				elif "bvid" in query:
+					query = parse_qs(query_str, keep_blank_values = True, strict_parsing = True)
 					bv_match = constants.bvid_pattern.fullmatch(query["bvid"][0])
-					if not bv_match:
-						return self.send_response(400)
 					bvid = bv_match[1]
-					args = {}
-					if self.server.max_duration:
-						args["max_duration"] = self.server.max_duration
-					max_duration_param = query.get("max_duration")
-					if max_duration_param and max_duration_param[0]:
-						try:
-							logger.debug(max_duration_param)
-							duration = int(max_duration_param[0])
-							if duration > 0:
-								args["max_duration"] = duration
-							else:
-								del args["max_duration"]
-
-						except ValueError:
-							return self.send_response(400)
-
-					if "audio_only" in query:
-						args["ignore"] = 'V'
-
-					result = self.server.schedule(bvid, args)
-					if result:
-						return self.send_response(200, "application/json", result)
-					else:
-						return self.send_response(429)
-				else:
+				except (TypeError, ValueError, KeyError, IndexError, UnicodeError):
 					return self.send_response(400)
+
+				args = {}
+				if self.server.max_duration:
+					args["max_duration"] = self.server.max_duration
+				max_duration_param = query.get("max_duration")
+				if max_duration_param and max_duration_param[0]:
+					try:
+						logger.debug(max_duration_param)
+						duration = int(max_duration_param[0])
+						if duration > 0:
+							args["max_duration"] = duration
+						else:
+							del args["max_duration"]
+
+					except ValueError:
+						return self.send_response(400)
+
+				if "audio_only" in query:
+					args["ignore"] = 'V'
+
+				result = self.server.schedule(bvid, args)
+				if result:
+					return self.send_response(200, "application/json", result)
+				else:
+					return self.send_response(429)
 
 		except Exception:
 			logger.exception("error in handle request")

@@ -123,10 +123,8 @@ class M3u:
 
 
 	async def async_update(self, request_func, url, *args, **kwargs):
-		buffer = io.BytesIO()
-		await request_func(buffer, url, *args, **kwargs)
-		buffer.seek(0)
-		result = self.parse(io.TextIOWrapper(buffer))
+		data = await request_func(url, *args, **kwargs)
+		result = self.parse(io.TextIOWrapper(data))
 		if result is str:
 			logger.debug("fetching variant_stream")
 			result = await async_update(self, request_func, result, *args, **kwargs)

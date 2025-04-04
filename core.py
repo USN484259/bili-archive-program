@@ -4,6 +4,7 @@ import os
 import re
 import time
 import fcntl
+import shutil
 import logging
 import zipfile
 import collections
@@ -114,12 +115,7 @@ class staged_file:
 					file_time = time.gmtime(stat.st_mtime)
 					file_info = zipfile.ZipInfo("%s-%d" % (file_name, int(stat.st_mtime)), file_time)
 					with archive.open(file_info, "w") as sink:
-						buffer = bytearray(0x1000)
-						while True:
-							len = src_fd.readinto(buffer)
-							if not len:
-								break
-							sink.write(buffer[:len])
+						shutil.copyfileobj(src_fd, sink)
 
 		except Exception:
 			logger.exception("failed to rotate file %s", self.filename)

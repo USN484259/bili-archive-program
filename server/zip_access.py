@@ -73,10 +73,10 @@ class zip_access_handler(HttpResponseMixin, FcgiHandler):
 			count = 0
 			length = range_tail - range_head
 			while count < length:
-				copy_size = min(length - count, 0x1000)
+				copy_size = min(length - count, 0x10000)
 				data = f.read(copy_size)
 				if not data:
-					break
+					raise EOFError()
 				yield data
 				count += min(copy_size, len(data))
 

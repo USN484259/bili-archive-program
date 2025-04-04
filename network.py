@@ -2,13 +2,16 @@
 
 import os
 import re
+import io
 import sys
 import time
 import httpx
+import socket
 import shutil
 import asyncio
 import logging
 import hashlib
+from contextlib import suppress
 from urllib.parse import urlencode
 
 import core
@@ -178,6 +181,46 @@ async def fetch(sess, url, path, **kwargs):
 					raise RuntimeError("unexpected EOF: %s", path)
 
 	return file_length
+
+
+async def fetch_stream(sess, url, sink_func = None, *args):
+	sink = None
+	try:
+		async with sess.stream("GET", url) as resp:
+			logger.debug(resp)
+			resp.raise_for_status()
+
+			async for chunk in resp.aiter_bytes():
+				if sink is None:
+					logger.debug("calling sink_func")
+					sink = sink_func and sink_func(*args) or io.BytesIO()
+
+				sink.write(chunk)
+
+		if not sink_func:
+			sink.seek(0)
+			return sink
+
+	finally:
+		if sink_func and (sink is not None):
+			logger.debug("closing sink")
+			sink.close()
+
+
+def create_unix_socket(path, *, mode = 0o600):
+	logger.debug("creating unix socket %s", path)
+	# https://stackoverflow.com/questions/11781134/change-linux-socket-file-permissions
+	sock = socket.socket(socket.AF_UNIX)
+	try:
+		os.fchmod(sock.fileno(), 0o600)
+		with suppress(FileNotFoundError):
+			os.unlink(path)
+		sock.bind(path)
+		os.chmod(path, mode)
+		return sock
+	except:
+		sock.close()
+		raise
 
 
 class image_fetcher:
