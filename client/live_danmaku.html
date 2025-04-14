@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8"/>
+	<title id="title"></title>
+</head>
+<body>
+	<table>
+		<tbody id="output">
+		</tbody>
+	</table>
+	<style>
+
+td {
+	padding: 5px;
+}
+
+	</style>
+	<script>
+
+function add_danmaku(danmaku) {
+	let output_elem = document.getElementById("output")
+	let tr_elem = document.createElement("tr");
+
+	let uname_elem = document.createElement("td")
+	uname_elem.append(danmaku.info[2][1])
+
+	let tag_elem = document.createElement("td")
+	if (danmaku.info[3].length > 0) {
+		tag_elem.append(danmaku.info[3][1] + ' ' + danmaku.info[3][0])
+	}
+
+	let text_elem = document.createElement("td")
+	text_elem.append(danmaku.info[1])
+
+	tr_elem.appendChild(uname_elem)
+	tr_elem.appendChild(tag_elem)
+	tr_elem.appendChild(text_elem)
+	output_elem.appendChild(tr_elem)
+
+	while (output_elem.childElementCount > 0x100) {
+		output_elem.firstElementChild.remove()
+	}
+	tr_elem.scrollIntoView({ behavior: "smooth", block: "end", inline: "start" })
+}
+
+
+addEventListener("DOMContentLoaded", () => {
+	const rid_pattern = new RegExp("[&?]room=(\\d+)");
+	let rid = document.location.search.match(rid_pattern)[1];
+	console.log(rid)
+	if (rid) {
+		let url = "ws://" + window.location.hostname + "/api/danmaku";
+		let ws = new WebSocket(url);
+
+		let buffer = ""
+
+		ws.onmessage = function (ev) {
+			buffer += ev.data
+
+			msg_list = buffer.split('\n')
+			buffer = msg_list.pop()
+			for (msg of msg_list) {
+			let danmaku = JSON.parse(msg);
+				if (danmaku.cmd == "DANMU_MSG") {
+					add_danmaku(danmaku);
+				}
+			}
+		};
+
+		ws.onopen = function (ev) {
+			console.log("Socket opened.");
+			ws.send(rid);
+
+			let title_elem = document.getElementById("title");
+			title_elem.append("Danmaku of room " + rid);
+		};
+		ws.onclose = function (ev) {
+			console.log("Socket closed.");
+		};
+		ws.onerror = function (ev) {
+			console.log("Socket error:", ev);
+		};
+	}
+})
+
+
+	</script>
+</body>
+</html>

@@ -30,13 +30,13 @@ async def get_live_status(sess, uid_list):
 	return info_map
 
 
-async def record_main(rid, path, rec_log):
+async def record_main(rid, path, rec_log, relay_path):
 	with core.locked_path(path) as rec_path:
 		if rec_log:
 			log_path = os.path.join(rec_path, "record.log")
 			runtime.logging_init(runtime.log_level - 10, log_path, no_stderr = True)
 		async with network.session() as sess:
-			await live_rec.record(sess, rid, rec_path)
+			await live_rec.record(sess, rid, rec_path, relay_path = relay_path)
 
 
 def exec_record(*args):
@@ -76,11 +76,11 @@ async def task_cleanup(record):
 	return True
 
 
-async def task_start(record, rid, path, rec_log = False):
+async def task_start(record, rid, path, rec_log, relay_root):
 	assert(record.get("task") is None)
 	task = multiprocessing.Process(
 		target = exec_record, args = (
-			rid, path, rec_log
+			rid, path, rec_log, (relay_root and os.path.join(relay_root, str(rid)) or None)
 		), daemon = False)
 	task.start()
 	record["task"] = task
@@ -91,6 +91,7 @@ class Config:
 		self.config_path = args.config
 		self.live_root = args.dir or runtime.subdir("live")
 		self.rec_log = args.rec_log
+		self.relay_root = args.relay_root
 		self.records = {}
 		self.lock = asyncio.Lock()
 
@@ -177,7 +178,7 @@ async def monitor_check(sess, config):
 			rec_path = os.path.join(config.live_root, rec_name)
 			logger.info("start recording %s, room %d, %s", name, rid, rec_name)
 
-			await task_start(record, rid, rec_path, config.rec_log)
+			await task_start(record, rid, rec_path, config.rec_log, config.relay_root)
 			active_rooms.append(name)
 
 		logger.info("active live rooms %d %s", len(active_rooms), " ".join(active_rooms))
@@ -209,7 +210,6 @@ async def monitor_task(config, interval):
 				except Exception:
 					scheduled_restart = False
 					logger.exception("exception on restart")
-
 
 
 # entrance
@@ -251,10 +251,11 @@ async def main(args):
 
 if __name__ == "__main__":
 	args = runtime.parse_args(("network", "auth", "dir", "prefer"), [
-		(("-c", "--config"), {"required": True}),
 		(("-i", "--interval"), {"type" : int, "default" : 30}),
 		(("--rec-log",), {"action": "store_true", "default": False}),
-		(("socket",), {"nargs": '?'}),
+		(("--relay-root",), {}),
+		(("--socket",), {}),
+		(("config",), {})
 	])
 	asyncio.run(main(args))
 

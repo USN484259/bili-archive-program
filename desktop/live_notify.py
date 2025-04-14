@@ -170,8 +170,8 @@ def main(args):
 
 	if args.config:
 		uid_list = load_config(args.config)
-	elif not args.url:
-		raise RuntimeError("neither url nor config specified")
+	elif not args.monitor_url:
+		raise RuntimeError("neither monitor-url nor config specified")
 
 	Notify.init(args.name)
 	rec = {
@@ -199,9 +199,9 @@ def main(args):
 		try:
 			logger.info("checking live status")
 			live_status = None
-			if args.url:
+			if args.monitor_url:
 				try:
-					live_status = fetch_status_local(sess, args.url)
+					live_status = fetch_status_local(sess, args.monitor_url)
 				except Exception:
 					if not uid_list:
 						raise
@@ -233,8 +233,8 @@ if __name__ == "__main__":
 	parser.add_argument("-v", "--verbose", action = "store_true")
 	parser.add_argument("--name", default = os.path.basename(sys.argv[0]))
 	parser.add_argument("--interval", type = int, default = 30)
-	parser.add_argument("-c", "--config")
-	parser.add_argument("url", nargs = '?')
+	parser.add_argument("--monitor-url")
+	parser.add_argument("config")
 
 	args = parser.parse_args()
 	logging.basicConfig(level = args.verbose and logging.DEBUG or logging.INFO, format = constants.LOG_FORMAT, stream = sys.stderr)

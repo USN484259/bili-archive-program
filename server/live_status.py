@@ -7,6 +7,7 @@ sys.path[0] = os.getcwd()
 import time
 import socket
 import argparse
+from contextlib import suppress
 from fcgi_server import FcgiServer, HttpResponseMixin
 from fastcgi import FcgiHandler
 
@@ -51,10 +52,29 @@ class LiveStatusServer(FcgiServer):
 
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser()
-	parser.add_argument("--interval", type = int, default = 2)
-	parser.add_argument("path")
+	parser.add_argument("--status-interval", type = int, default = 2)
+	parser.add_argument("--status-socket")
+	parser.add_argument("--danmaku-root")
+	parser.add_argument("--danmaku-socket")
 
 	args = parser.parse_args()
 
-	with LiveStatusServer(live_status_handler, args.path, args.interval) as server:
+	# danmaku_server is a standalone service running on the host
+	# it works with mod_wstunnel and is not related to fastCGI
+	# to make danmaku_server start with lighty, attach it to
+	# some FCGI service, such as live_status here
+	if args.danmaku_root and args.danmaku_socket:
+		if os.fork() == 0:
+			try:
+				from danmaku_server import DanmakuServer, danmaku_handler
+
+				with suppress(OSError):
+					os.unlink(args.danmaku_socket)
+				with DanmakuServer(args.danmaku_root, args.danmaku_socket, danmaku_handler) as server:
+					server.serve_forever(poll_interval = 600)
+
+			finally:
+				os._exit(0)
+
+	with LiveStatusServer(live_status_handler, args.status_socket, args.status_interval) as server:
 		server.serve_forever(poll_interval = 600)

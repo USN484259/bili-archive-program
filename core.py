@@ -9,25 +9,15 @@ import logging
 import zipfile
 import collections
 
-from constants import *
 
 # constants
 
-DEFAULT_NAME_MAP = {
-	"danmaku": "danmaku.xml",
-	"tmp_ext": ".tmp",
-	"novideo": ".novideo",
-	"noaudio": ".noaudio",
-	"hls_index": "index.m3u8",
-	"rotate_postfix": "-rotate.zip",
-	"backup_postfix": ".bak",
-}
+from constants import *
+
 
 # static objects
 
 logger = logging.getLogger("bili_arch.core")
-
-default_names = collections.namedtuple("DefaultName", DEFAULT_NAME_MAP.keys())(**DEFAULT_NAME_MAP)
 
 
 ## file management

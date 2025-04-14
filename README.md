@@ -115,7 +115,7 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 # 使用`cron(8)`开机启动，在tmux session中启动直播间录制
 $ crontab -l
 SHELL=/bin/bash
-@reboot tmux new-session -d -s bili -c /PATH/TO/RECORDING/DIR "./monitor.py -v --rec-log -c rec_config.json -u bili-credential.txt -r bili-arch -i 20 /srv/http/tmp/bili-monitor.socket"
+@reboot tmux new-session -d -s bili -c /PATH/TO/RECORDING/DIR "./monitor.py -v --rec-log -u bili-credential.txt -r bili-arch -i 20 --relay-root /srv/http/tmp/live/ --socket /srv/http/tmp/bili-monitor.socket rec_config.json"
 ```
 
 ### http 服务
@@ -179,7 +179,7 @@ sudo systemctl restart lighttpd
 #!/bin/sh
 REC_SERVER=localhost
 cd /PATH/TO/CODE
-exec desktop/live_notify.py -c config/rec_config.json http://$REC_SERVER/api/live_status
+exec desktop/live_notify.py --monitor-url http://$REC_SERVER/api/live_status config/rec_config.json
 ```
 
 
@@ -223,3 +223,22 @@ Comment=Bilibili Live Notifier
 + [RFC 8216](https://www.rfc-editor.org/rfc/rfc8216): HTTP Live Streaming
 + [RFC 6455](https://www.rfc-editor.org/rfc/rfc6455) The WebSocket Protocol
 + [btrfs](https://btrfs.wiki.kernel.org) is a modern copy on write (COW) filesystem for Linux aimed at implementing advanced features while also focusing on fault tolerance, repair and easy administration.
+
+
+### About `ssl` module safety on `fork(2)`
+
++ The warning messages in Python docs
+
+	+ https://docs.python.org/3/library/os.html#os.fork
+	+ https://docs.python.org/3/library/ssl.html#multi-processing
+
++ The mentioned patch seems not merged into cpython. It is likely that there is no protection on the Python side.
+
+	+ https://bugs.python.org/issue18747
+	+ https://bugs.python.org/file31390/openssl_prng_atfork5.patch
+
++ According to the OpenSSL Wiki, OpenSSL 1.1.1 rewrote RNG and elimated this issue. For lower versions, at least the pid-based solution is in effect. As pid wrap-around is unlikely in practice, this issue should not be a great concern.
+
+	+ https://wiki.openssl.org/index.php/Random_fork-safety
+
++ As a result, protecting `ssl` module against `fork(2)` is considered unnecessary and is not implemented in this project.

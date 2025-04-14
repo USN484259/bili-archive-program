@@ -4,6 +4,7 @@ import os
 import time
 import json
 import zlib
+import socket
 import brotli
 import struct
 import asyncio
@@ -217,3 +218,84 @@ class LiveDanmaku:
 					logger.exception("failed to parse brotli packet")
 					break
 		return result
+
+class DanmakuRelay:
+	Client = namedtuple("Client", ("name", "reader", "writer"))
+
+	@staticmethod
+	def get_peer_name(sock):
+		result = "?"
+		try:
+			data = sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 0x20)
+			# assume pid_t is signed int
+			pid = struct.unpack_from("=i", data)[0]
+			result = str(pid)
+		except Exception:
+			pass
+		return result
+
+	@staticmethod
+	def close_client(client):
+		logger.info("danmaku closing %s", client.name)
+		try:
+			client.writer.write_eof()
+			client.writer.close()
+		except Exception:
+			logger.exception("failed to close client %s", client.name)
+
+	def __init__(self, sock_path):
+		self.sock = network.create_unix_socket(sock_path, mode = 0o666)
+		self.server = None
+		self.client_list = []
+
+	async def __aenter__(self):
+		async def on_connected(reader, writer):
+			name = self.get_peer_name(writer.get_extra_info("socket"))
+			logger.info("danmaku connected from %s", name)
+			self.client_list.append(self.Client(name, reader, writer))
+		self.server = await asyncio.start_unix_server(on_connected, sock = self.sock, start_serving = True)
+		logger.info("danmaku server started")
+		return self
+
+	async def __aexit__(self, exc_type, exc_value, traceback):
+		await self.close()
+
+	async def close(self):
+		try:
+			if self.server is not None:
+				self.server.close()
+
+			for client in self.client_list:
+				self.close_client(client)
+
+			if self.server is not None:
+				await self.server.wait_closed()
+		finally:
+			self.server = None
+			self.client_list.clear()
+
+	async def dispatch(self, *data):
+		logger.debug("dispatching %d messages to %d clients", len(data), len(self.client_list))
+		alive_client_list = []
+		for client in self.client_list:
+			alive = False
+			try:
+				if not client.writer.is_closing():
+					buffered_len = client.writer.transport.get_write_buffer_size()
+					water_mark = min(0x10000, client.writer.transport.get_write_buffer_limits()[1])
+					if buffered_len < water_mark:
+						client.writer.writelines(data)
+					else:
+						logger.warning("client congestion %d/%d %s", buffered_len, water_mark, client.name)
+
+					alive = True
+
+			except Exception:
+				logger.exception("failed to send to client %s", client.name)
+
+			if alive:
+				alive_client_list.append(client)
+			else:
+				self.close_client(client)
+
+		self.client_list = alive_client_list
