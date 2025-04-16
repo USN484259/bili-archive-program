@@ -14,7 +14,7 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 + favlist.py	下载收藏夹信息和视频
 + user.py	下载用户信息和投稿视频
 + verify.py	验证本地视频完整性
-+ live_rec.py	直播录制，支持FLV/HLS直播流，支持录制弹幕
++ live_rec.py	直播录制，支持FLV/HLS直播流，支持录制弹幕，转发弹幕数据
 + monitor.py	直播间批量监控和录制
 
 ### 常见参数说明
@@ -51,7 +51,7 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 + video_page.html	视频页面，显示BV基本信息，视频分P播放，获取相关推荐BV
 + video_fetch.html	视频缓存页面，输入BV号缓存视频，显示缓存状态
 + live_page.html	直播状态页面，显示monitor.py监控的直播间状态
-
++ live_danmaku.html	显示直播间实时弹幕，使用live_rec.py转发的弹幕信息
 
 ## 依赖表
 
@@ -83,13 +83,14 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 
 ### http前端
 
-|	项目		|	浏览器	|	javascript	|	flv.min.js	|	hls.min.js	|
-|	----		|	----	|	----		|	----		|	----		|
-|	index.html	|	any	|	M		|			|			|
-|	player.html	|	any	|	M		|	O		|	O		|
-|	video_page.html	|	any	|	M		|			|			|
-|	video_fetch.html|	any	|	M		|			|			|
-|	live_page.html	|	any	|	M		|			|			|
+|	项目			|	浏览器	|	javascript	|	flv.min.js	|	hls.min.js	|
+|	----			|	----	|	----		|	----		|	----		|
+|	index.html		|	any	|	M		|			|			|
+|	player.html		|	any	|	M		|	O		|	O		|
+|	video_page.html		|	any	|	M		|			|			|
+|	video_fetch.html	|	any	|	M		|			|			|
+|	live_page.html		|	any	|	M		|			|			|
+|	live_danmaku.html	|	any	|	M		|			|			|
 
 ### 桌面应用
 

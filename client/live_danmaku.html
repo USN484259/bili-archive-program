@@ -15,11 +15,18 @@ td {
 	padding: 5px;
 }
 
+.superchat {
+	background-color: #6688ee;
+}
+
+.captain {
+	background-color: #cc8844;
+}
+
 	</style>
 	<script>
 
-function add_danmaku(danmaku) {
-	let output_elem = document.getElementById("output")
+function add_danmaku(danmaku, output_elem) {
 	let tr_elem = document.createElement("tr");
 
 	let uname_elem = document.createElement("td")
@@ -38,12 +45,51 @@ function add_danmaku(danmaku) {
 	tr_elem.appendChild(text_elem)
 	output_elem.appendChild(tr_elem)
 
-	while (output_elem.childElementCount > 0x100) {
-		output_elem.firstElementChild.remove()
-	}
-	tr_elem.scrollIntoView({ behavior: "smooth", block: "end", inline: "start" })
+	return tr_elem
+
 }
 
+function add_superchat(danmaku, output_elem) {
+	let tr_elem = document.createElement("tr");
+
+	let uname_elem = document.createElement("td")
+	uname_elem.append(danmaku.data.user_info.uname)
+
+	let price_elem = document.createElement("td")
+	price_elem.append('¥' + danmaku.data.price)
+
+	let text_elem = document.createElement("td")
+	text_elem.append(danmaku.data.message)
+
+	tr_elem.appendChild(uname_elem)
+	tr_elem.appendChild(price_elem)
+	tr_elem.appendChild(text_elem)
+	output_elem.appendChild(tr_elem)
+
+	tr_elem.className = "superchat";
+	return tr_elem
+}
+
+function add_captain(danmaku, output_elem) {
+	let tr_elem = document.createElement("tr");
+
+	let uname_elem = document.createElement("td")
+	uname_elem.append(danmaku.data.username)
+
+	let count_elem = document.createElement("td")
+	count_elem.append("" + danmaku.data.num)
+
+	let text_elem = document.createElement("td")
+	text_elem.append(danmaku.data.gift_name)
+
+	tr_elem.appendChild(uname_elem)
+	tr_elem.appendChild(count_elem)
+	tr_elem.appendChild(text_elem)
+	output_elem.appendChild(tr_elem)
+
+	tr_elem.className = "captain";
+	return tr_elem
+}
 
 addEventListener("DOMContentLoaded", () => {
 	const rid_pattern = new RegExp("[&?]room=(\\d+)");
@@ -53,6 +99,7 @@ addEventListener("DOMContentLoaded", () => {
 		let url = "ws://" + window.location.hostname + "/api/danmaku";
 		let ws = new WebSocket(url);
 
+		let output_elem = document.getElementById("output")
 		let buffer = ""
 
 		ws.onmessage = function (ev) {
@@ -60,12 +107,27 @@ addEventListener("DOMContentLoaded", () => {
 
 			msg_list = buffer.split('\n')
 			buffer = msg_list.pop()
+			let last_elem = null
+
 			for (msg of msg_list) {
 			let danmaku = JSON.parse(msg);
 				if (danmaku.cmd == "DANMU_MSG") {
-					add_danmaku(danmaku);
+					last_elem = add_danmaku(danmaku, output_elem);
+				}
+				else if (danmaku.cmd == "SUPER_CHAT_MESSAGE") {
+					last_elem = add_superchat(danmaku, output_elem);
+				}
+				else if (danmaku.cmd == "GUARD_BUY") {
+					last_elem = add_captain(danmaku, output_elem);
 				}
 			}
+
+			while (output_elem.childElementCount > 0x100) {
+				output_elem.firstElementChild.remove()
+			}
+			if (last_elem)
+				last_elem.scrollIntoView({ behavior: "smooth", block: "end", inline: "start" })
+
 		};
 
 		ws.onopen = function (ev) {

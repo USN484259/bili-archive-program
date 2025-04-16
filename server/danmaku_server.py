@@ -14,7 +14,7 @@ class danmaku_handler(socketserver.BaseRequestHandler):
 	def handle(self):
 		self.request.settimeout(5)
 		rid = int(self.request.recv(0x100).decode())
-		sock_path = os.path.join(self.server.danmaku_root, str(rid), constants.default_names[danmaku_socket])
+		sock_path = os.path.join(self.server.danmaku_root, str(rid), constants.default_names.danmaku_socket)
 		danmaku_sock = None
 		pipes = None
 
@@ -26,7 +26,9 @@ class danmaku_handler(socketserver.BaseRequestHandler):
 			self.request.settimeout(None)
 			while True:
 				transferred = os.splice(danmaku_sock.fileno(), pipes[1], 0x10000)
-				transferred += os.splice(pipes[0], self.request.fileno(), 0x10000)
+				if transferred == 0:
+					break
+				transferred = os.splice(pipes[0], self.request.fileno(), 0x10000)
 				if transferred == 0:
 					break
 
@@ -38,7 +40,7 @@ class danmaku_handler(socketserver.BaseRequestHandler):
 				os.close(pipes[1])
 
 
-class DanmakuServer(socketserver.ForkingUnixStreamServer):
+class DanmakuServer(socketserver.ThreadingUnixStreamServer):
 	def __init__(self, danmaku_root, *args):
 		super().__init__(*args)
 		self.danmaku_root = danmaku_root

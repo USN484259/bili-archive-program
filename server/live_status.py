@@ -64,7 +64,8 @@ if __name__ == "__main__":
 	# to make danmaku_server start with lighty, attach it to
 	# some FCGI service, such as live_status here
 	if args.danmaku_root and args.danmaku_socket:
-		if os.fork() == 0:
+		pid = os.fork()
+		if pid == 0:
 			try:
 				from danmaku_server import DanmakuServer, danmaku_handler
 
@@ -75,6 +76,8 @@ if __name__ == "__main__":
 
 			finally:
 				os._exit(0)
+		else:
+			os.waitpid(pid, os.WNOHANG)
 
 	with LiveStatusServer(live_status_handler, args.status_socket, args.status_interval) as server:
 		server.serve_forever(poll_interval = 600)
