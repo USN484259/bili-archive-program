@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 
 import os
+import sys
 import re
 import time
-import fcntl
 import shutil
 import logging
 import zipfile
 import collections
 
+if sys.platform != "win32":
+	import fcntl
+else:
+	fcntl = None
 
 # constants
 
@@ -34,6 +38,8 @@ def mkdir(path):
 
 def locked_file(filename, mode, **kwargs):
 	f = open(filename, mode = mode, **kwargs)
+	if not fcntl:
+		return f
 	if 'r' in mode and '+' not in mode:
 		lock_mode = fcntl.LOCK_SH
 	else:
@@ -123,6 +129,8 @@ class locked_path(os.PathLike):
 	def __init__(self, *path_list, shared = False):
 		self.path = os.path.join(*path_list)
 		mkdir(self.path)
+		if not fcntl:
+			return
 		self.fd = os.open(self.path, os.O_RDONLY | os.O_DIRECTORY)
 		lock_mode = (shared and fcntl.LOCK_SH or fcntl.LOCK_EX)
 		try:
@@ -144,6 +152,8 @@ class locked_path(os.PathLike):
 		self.close()
 
 	def close(self):
+		if not fcntl:
+			return
 		if self.fd is not None:
 			os.close(self.fd)
 			self.fd = None

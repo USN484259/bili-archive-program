@@ -94,9 +94,10 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 
 ### 桌面应用
 
-|	项目		|	OS	|	Python3.8+	|	httpx		|	python3-gi	|
-|	----		|	----	|	----		|	----		|	----		|
-|	live_notify.py	|	Linux	|	M		|	M		|	M		|
+|	项目			|	OS	|	Python3.8+	|	httpx		|	python3-gi	|	websockets	|	brotli	|
+|	----			|	----	|	----		|	----		|	----		|	----		|	----	|
+|	live_notify.py		|	Linux	|	M		|	M		|	M		|			|		|
+|	danmaku_reaction.py	|	Windows	|	M		|	M		|			|	M		|	M	|
 
 ### 移植提示
 
@@ -198,6 +199,14 @@ Comment[en_US]=Bilibili Live Notifier
 Comment=Bilibili Live Notifier
 ```
 
+### 弹幕反馈
+
+```powershell
+
+python desktop/danmaku_reaction.py -u $HOME/bili-credential.txt config/danmaku.toml
+
+```
+
 
 ## 引用
 
@@ -223,6 +232,7 @@ Comment=Bilibili Live Notifier
 + [FastCGI Specification](https://fast-cgi.github.io/spec.html) (Unofficial)
 + [RFC 8216](https://www.rfc-editor.org/rfc/rfc8216): HTTP Live Streaming
 + [RFC 6455](https://www.rfc-editor.org/rfc/rfc6455) The WebSocket Protocol
++ [TOML](https://toml.io) Tom's Obvious Minimal Language. A config file format for humans.
 + [btrfs](https://btrfs.wiki.kernel.org) is a modern copy on write (COW) filesystem for Linux aimed at implementing advanced features while also focusing on fault tolerance, repair and easy administration.
 
 

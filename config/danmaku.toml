@@ -1,0 +1,58 @@
+version = 1
+room = 81004
+
+[rules]
+
+[rules.show_self]
+enabled = false
+condition = [
+	{ key = "uname", op = "==", value = "USN484259" },
+]
+action = [ "print", "play_test_sound" ]
+
+
+[rules.superchat]
+condition = [
+	{ key = "type", op = "==", value = "superchat" },
+]
+action = [ "play_superchat_sound" ]
+
+
+[rules.captain]
+condition = [
+	{ key = "type", op = "==", value = "captain" },
+	{ key = "role", op = "==", value = "舰长" },
+]
+action = [ "play_captain_sound" ]
+
+
+[actions]
+
+[actions.print]
+type = "text"
+
+
+[actions.play_test_sound]
+type = "play_audio"
+file = "test1.wav"
+
+[[actions.play_superchat_sound]]
+type = "play_audio"
+file = "test2.wav"
+weight = 2
+
+[[actions.play_superchat_sound]]
+type = "play_audio"
+file = "test3.wav"
+weight = 1
+
+[[actions.play_superchat_sound]]
+type = "play_audio"
+file = "test4.wav"
+weight = 3
+
+
+[actions.play_captain_sound]
+type = "play_audio"
+file = "test5.wav"
+
