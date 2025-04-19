@@ -95,8 +95,8 @@ class LiveDanmaku:
 				self.conn = await ws_connect(url, user_agent_header = core.USER_AGENT["User-Agent"])
 				await self.send_verity()
 				return index
-			except Exception:
-				logger.exception("failed to connect live danmaku")
+			except Exception as e:
+				logger.error("failed to connect live danmaku: %s", str(e))
 				await self.close()
 				index = (index + 1) % len(self.hosts)
 				if index == start_index:
@@ -158,8 +158,8 @@ class LiveDanmaku:
 				await self.write(data)
 				info = await get_live_heartbeat(self.sess, self.rid, interval)
 				interval = info.get("next_interval")
-			except Exception:
-				logger.exception("failed to send heartbeat")
+			except Exception as e:
+				logger.error("failed to send heartbeat: %s", str(e))
 				interval = 60
 			await asyncio.sleep(interval)
 
@@ -181,8 +181,8 @@ class LiveDanmaku:
 					self.host_index = await self.connect(self.host_index)
 				except WebSocketException:
 					await self.start()
-			except Exception:
-				logger.exception("failed to read socket")
+			except Exception as e:
+				logger.error("failed to read socket: %s", str(e))
 				# prevent busy loop
 				await self.stall()
 
@@ -214,8 +214,8 @@ class LiveDanmaku:
 					header = self.Header(*struct.unpack_from(">IHHII", data, offset = offset))
 					result += await self.parse(header, data[offset + header.header_size : offset + header.size])
 					offset += header.size
-				except Exception:
-					logger.exception("failed to parse brotli packet")
+				except Exception as e:
+					logger.error("failed to parse brotli packet: %s", str(e))
 					break
 		return result
 
@@ -240,8 +240,8 @@ class DanmakuRelay:
 		try:
 			client.writer.write_eof()
 			client.writer.close()
-		except Exception:
-			logger.exception("failed to close client %s", client.name)
+		except Exception as e:
+			logger.error("failed to close client %s: %s", client.name, str(e))
 
 	def __init__(self, sock_path):
 		self.sock = network.create_unix_socket(sock_path, mode = 0o666)
@@ -290,8 +290,8 @@ class DanmakuRelay:
 
 					alive = True
 
-			except Exception:
-				logger.exception("failed to send to client %s", client.name)
+			except Exception as e:
+				logger.error("failed to send to client %s: %s", client.name, str(e))
 
 			if alive:
 				alive_client_list.append(client)

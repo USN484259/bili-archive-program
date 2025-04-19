@@ -113,8 +113,8 @@ class staged_file:
 					with archive.open(file_info, "w") as sink:
 						shutil.copyfileobj(src_fd, sink)
 
-		except Exception:
-			logger.exception("failed to rotate file %s", self.filename)
+		except Exception as e:
+			logger.error("failed to rotate file %s: %s", self.filename, str(e))
 			backup_name = self.filename + default_names.backup_postfix
 			logger.info("using backup file %s", backup_name)
 			if os.path.isfile(backup_name):

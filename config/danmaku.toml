@@ -1,58 +1,147 @@
+# 示例配置文件，请根据需要自行修改
+# 这样的是注释
+# 注意组成配置的括号、引号等均需要使用英文
+# TOML 配置文件完整语法可参见 https://toml.io/en/v1.0.0
+
+
+# 配置文件版本号，与软件匹配，目前为1
 version = 1
+
+# 填写直播间ID
 room = 81004
 
+
+# 工作概述
+# 连接直播间弹幕，从弹幕流中提取出事件，目前支持的事件见下方事件列表
+# 对于一个事件，每个规则都会进行判断，若某个规则判断通过，该规则中指定的操作将会执行
+
+
+# 规则列表头
 [rules]
 
-[rules.show_self]
-enabled = false
-condition = [
-	{ key = "uname", op = "==", value = "USN484259" },
-]
-action = [ "print", "play_test_sound" ]
-
-
+# 可添加多个规则，每个规则以 [rules.规则名称] 开头
 [rules.superchat]
+# 是否启用规则，缺省为true，设置为false时本规则不加载
+# enabled = false
+
+# 规则要执行的判断列表，可添加多条判断，所有判断都通过，下面的操作才会执行
 condition = [
-	{ key = "type", op = "==", value = "superchat" },
+	# 一个判断条件，由 key, op, value 三部分组成
+	# key 指定要判断的对象，详见下方的事件列表
+	# op 指定进行的判断操作
+	# '==' 判断相等，'!=' 判断不相等
+	# '<' '<=' '>' '>=' 判断大小
+	# 'find' 判断value指定的内容是否出现
+	# 'regex' 进行正则表达式匹配
+
+	# 当前事件是收到SC
+	{ key = 'type', op = '==', value = 'superchat' },
+
+	# 并且SC金额大于等于30
+	{ key = 'price', op = '>=', value = 30 },
+
+	# 并且SC金额小于100
+	{ key = 'price', op = '<', value = 100 },
 ]
-action = [ "play_superchat_sound" ]
+
+# 如果所有判断都通过，则要执行的操作名称，可添加多个操作，会依次执行
+action = [
+	# 每一项都为操作的名称，匹配下面操作列表中的名称
+	'print',
+	'play_superchat_sound',
+]
 
 
+# 另一个规则
 [rules.captain]
 condition = [
-	{ key = "type", op = "==", value = "captain" },
-	{ key = "role", op = "==", value = "舰长" },
+	{ key = 'type', op = '==', value = 'captain' },
+	{ key = 'role', op = '==', value = '舰长' },
 ]
-action = [ "play_captain_sound" ]
+action = [ 'play_captain_sound' ]
+
+# 规则列表结束
 
 
+# 操作列表头
 [actions]
 
+# 可添加多个操作，每个操作以 [actions.操作名称] 开头
 [actions.print]
-type = "text"
+# type指定本操作的类型，'text'操作将事件内容打印出来
+type = 'text'
 
 
-[actions.play_test_sound]
-type = "play_audio"
-file = "test1.wav"
+# 另一个操作
+[actions.play_captain_sound]
+# 'play_audio' 操作将播放指定的WAV音频文件
+type = 'play_audio'
+# file 参数指定WAV音频文件的位置，如果不在同一目录，还需要给出路径
+file = 'D:\sound\测试.wav'
 
+
+# 可以创建一个操作组，执行时会随机选择其中的一个
+# 这样的操作组以 [[actions.操作组名称]] 开头
 [[actions.play_superchat_sound]]
-type = "play_audio"
-file = "test2.wav"
+# 这是操作组的第一个成员
+type = 'play_audio'
+file = 'test1.wav'
+# 指定该成员的权重，随机时会按照组中各成员权重的分布分配概率
+# 播放test1的概率是25%
 weight = 2
 
+# 重复同样的名称为操作组添加成员
 [[actions.play_superchat_sound]]
-type = "play_audio"
-file = "test3.wav"
+# 这是操作组的第二个成员
+type = 'play_audio'
+file = 'test2.wav'
+# 如果权重未指定，缺省值为1
+# 播放test2的概率是12.5%
+# weight = 1
+
+# 重复同样的名称为操作组添加成员
+[[actions.play_superchat_sound]]
+# 这是操作组的第三个成员
+type = 'play_audio'
+file = 'test3.wav'
+# 播放test3的概率是50%
+weight = 4
+
+# 重复同样的名称为操作组添加成员
+[[actions.play_superchat_sound]]
+# 这是操作组的第四个成员
+# 'null' 为空操作，什么都不做
+type = 'null'
+# 什么都不做的概率是12.5%
 weight = 1
 
-[[actions.play_superchat_sound]]
-type = "play_audio"
-file = "test4.wav"
-weight = 3
+
+# 操作列表结束
 
 
-[actions.play_captain_sound]
-type = "play_audio"
-file = "test5.wav"
+# 目前支持的事件有以下几种
+#
+# 弹幕事件
+# type = 'danmaku'
+# uname = 发送弹幕的用户名
+# tagname = 用户佩戴的粉丝牌名称
+# taglevel = 用户佩戴的粉丝牌等级
+# text = 弹幕内容
+#
+# SC事件
+# type = 'superchat'
+# uname = 发送SC的用户名
+# tagname = 用户佩戴的粉丝牌名称
+# taglevel = 用户佩戴的粉丝牌等级
+# price = SC价格
+# text = SC内容
+#
+# 舰长事件
+# type = 'captain'
+# role = 上舰类型，'舰长'/'提督'/'总督'
+# uname = 上舰的用户名
+# price = 上舰总价
+# count = 上舰月数
+# unit_price = 上舰单价
+# text = 系统生成的上舰消息文本
 

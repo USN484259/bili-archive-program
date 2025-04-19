@@ -286,11 +286,11 @@ class image_fetcher:
 							await self.stall()
 							await fetch(self.sess, url, file_name)
 							self.cache_map[name] = file_name
-					except Exception:
+					except Exception as e:
 						if cached_file:
-							logger.exception("failed to copy file %s to %s", cached_file, path)
+							logger.error("failed to copy file %s to %s: %s", cached_file, path, str(e))
 						else:
-							logger.exception("failed to fetch image %s", name)
+							logger.error("failed to fetch image %s: %s", name, str(e))
 
 			self.queue.task_done()
 

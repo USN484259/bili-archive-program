@@ -35,16 +35,19 @@ def parse_danmaku(ev):
 	return {
 		"type":		"danmaku",
 		"uname":	info[2][1],
-		"tag":		info[3] and (info[3][1], info[3][0]) or None,
+		"tagname":	info[3] and info[3][1] or "",
+		"taglevel":	info[3] and info[3][0] or 0,
 		"text":		info[1],
 	}
 
 def parse_superchat(ev):
 	data = ev["data"]
+	medal_info = data.get("medal_info")
 	return {
 		"type":		"superchat",
 		"uname":	data["user_info"]["uname"],
-		"tag":		"medal_info" in data and (data["medal_info"]["medal_name"], data["medal_info"]["medal_level"]) or None,
+		"tagname":	medal_info and medal_info["medal_name"] or "",
+		"taglevel":	medal_info and medal_info["medal_level"] or 0,
 		"price":	data["price"],
 		"text":		data["message"],
 	}
@@ -342,9 +345,10 @@ async def main(args):
 					except Exception as e:
 						logger.error("failed in dispatcher: %s", str(e))
 
-	except Exception as e:
+	except:
+		e = sys.exception()
 		logger.error("exception in main: %s", str(e))
-		raise
+
 
 if __name__ == "__main__":
 	args = runtime.parse_args(("auth", ), [
