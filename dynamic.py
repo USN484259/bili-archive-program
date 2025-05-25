@@ -26,13 +26,13 @@ async def get_dynamic_list(sess, uid, offset = None):
 	params = {"host_mid": uid}
 	if offset:
 		params["offset"] = offset
-	info = await network.request(sess, "GET", USER_DYNAMIC_URL, params = params)
-	return info
+	resp = await network.request(sess, "GET", USER_DYNAMIC_URL, wbi_sign = True, params = params)
+	return resp.get("data")
 
 
 async def get_dynamic_detail(sess, oid):
-	info = await network.request(sess, "GET", DYNAMIC_DETAIL_URL, wbi_sign = True, params = {"id": oid})
-	return info
+	resp = await network.request(sess, "GET", DYNAMIC_DETAIL_URL, wbi_sign = True, params = {"id": oid})
+	return resp.get("data")
 
 
 # methods

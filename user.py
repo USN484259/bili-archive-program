@@ -25,18 +25,18 @@ logger = logging.getLogger("bili_arch.user")
 # helper functions
 
 async def get_user_full_info(sess, uid):
-	info = await network.request(sess, "GET", USER_FULL_INFO_URL, wbi_sign = True, params = {"mid": uid})
-	return info
+	resp = await network.request(sess, "GET", USER_FULL_INFO_URL, wbi_sign = True, params = {"mid": uid})
+	return resp.get("data")
 
 
 async def get_user_basic_info(sess, uid_list):
-	info = await network.request(sess, "GET", USER_BASIC_INFO_URL, wbi_sign = True, params = {"uids": ",".join(uid_list)})
-	return info
+	resp = await network.request(sess, "GET", USER_BASIC_INFO_URL, wbi_sign = True, params = {"uids": ",".join(uid_list)})
+	return resp.get("data")
 
 
 async def get_user_brief_info(sess, uid_list):
-	info = await network.request(sess, "GET", USER_BRIEF_INFO_URL, params = {"uids": ",".join(uid_list)})
-	return {str(u["mid"]): u for u in info}
+	resp = await network.request(sess, "GET", USER_BRIEF_INFO_URL, params = {"uids": ",".join(uid_list)})
+	return {str(u["mid"]): u for u in resp.get("data")}
 
 
 # methods

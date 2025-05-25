@@ -24,7 +24,10 @@ td {
 }
 
 	</style>
-	<script>
+	<script type="module">
+
+import * as config from "/config.js";
+
 
 function add_danmaku(danmaku, output_elem) {
 	let tr_elem = document.createElement("tr");
@@ -92,11 +95,12 @@ function add_captain(danmaku, output_elem) {
 }
 
 addEventListener("DOMContentLoaded", () => {
-	const rid_pattern = new RegExp("[&?]room=(\\d+)");
-	let rid = document.location.search.match(rid_pattern)[1];
+	let params = new URLSearchParams(document.location.search);
+	let rid = params.get("room");
+
 	console.log(rid)
 	if (rid) {
-		let url = "ws://" + window.location.hostname + "/api/danmaku";
+		let url = "ws://" + window.location.hostname + config.live_danmaku_api;
 		let ws = new WebSocket(url);
 
 		let output_elem = document.getElementById("output")

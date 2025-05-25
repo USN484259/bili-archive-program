@@ -4,9 +4,9 @@
 	<meta charset="utf-8">
 </head>
 <body>
-	<h1 id="title"><a href="/cache/index.html">Cached Videos</a></h1>
+	<h1 id="title"><a id="cache_link">Cached Videos</a></h1>
 
-	<form id="fetch_form" method="POST" action="/api/video_cache">
+	<form id="fetch_form" method="POST">
 		<span>
 			<label for="bv_input">Cache new video </label>
 			<input name="bvid" id="bv_input" required autofocus />
@@ -79,13 +79,10 @@ tbody tr:nth-child(even) {
 	background-color: #eeeeee;
 }
 	</style>
-	<script>
+	<script type="module">
 
-const cache_api = document.forms["fetch_form"].action
-const cache_root = "/cache/"
-const player_url = "/video_page.html";
-let localtime = new Intl.DateTimeFormat(undefined, {dateStyle: "medium", timeStyle: "medium"})
-
+import * as config from "/config.js";
+let util_module = import(config.util_module);
 
 class TaskList {
 	map;
@@ -101,7 +98,7 @@ class TaskList {
 		let td_elem = document.createElement("td")
 		let datetime = item[key]
 		if (datetime)
-			td_elem.append(localtime.format(new Date(datetime)))
+			td_elem.append(util.localtime_string(datetime))
 
 		tr_elem.appendChild(td_elem)
 	}
@@ -114,7 +111,7 @@ class TaskList {
 		// bvid
 		let bvid_elem = document.createElement("td")
 		let a_elem = document.createElement("a")
-		let url = player_url + "?path=" + cache_root + bvid
+		let url = util.make_video_url(config.video_cache_root + bvid)
 		a_elem.setAttribute("href", url)
 
 		let title = bvid
@@ -174,7 +171,7 @@ class TaskList {
 
 		Promise.all(
 			task_list.map(
-				(task) => fetch(cache_root + task.bvid + "/info.json").then((resp) => resp.json()).catch((err) => {})
+				(task) => fetch(config.video_cache_root + task.bvid + "/info.json").then((resp) => resp.json()).catch((err) => {})
 			)
 		).then((info_list) => {
 			console.log(info_list)
@@ -187,7 +184,7 @@ class TaskList {
 		})
 	}
 	update() {
-		let url = new URL(cache_api, document.location)
+		let url = new URL(config.video_cache_api, document.location)
 		if (this.running_timestamp)
 			url.search = new URLSearchParams({"since": this.running_timestamp}).toString()
 		else if (this.last_update_time)
@@ -205,11 +202,16 @@ class TaskList {
 	}
 };
 
-addEventListener("DOMContentLoaded", () => {
+addEventListener("DOMContentLoaded", () => util_module.then((util) => {
+	globalThis.util = util;
 	let task_list = new TaskList()
-	document.forms["fetch_form"].addEventListener("submit", (ev) => {
+	let form_elem = document.forms["fetch_form"];
+
+	document.getElementById("cache_link").href = config.video_cache_root + "index.html";
+	form_elem.action = config.video_cache_api;
+	form_elem.addEventListener("submit", (ev) => {
 		ev.preventDefault();
-		form_data = new FormData(ev.target)
+		let form_data = new FormData(ev.target)
 
 		for (let [name, value] of Array.from(form_data.entries())) {
 			if (value === '') form_data.delete(name);
@@ -219,7 +221,7 @@ addEventListener("DOMContentLoaded", () => {
 			method: "POST",
 			body: new URLSearchParams(form_data)
 		}).then((resp) => {
-			msg_elem = document.getElementById("msg")
+			let msg_elem = document.getElementById("msg")
 			if (resp.ok) {
 				ev.target.reset();
 				msg_elem.value = ""
@@ -232,7 +234,7 @@ addEventListener("DOMContentLoaded", () => {
 
 	task_list.update()
 	setInterval(() => {task_list.update()}, 4 * 1000)
-});
+}));
 	</script>
 </body>
 </html>

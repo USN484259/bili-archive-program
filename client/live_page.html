@@ -61,8 +61,8 @@ tbody tr:nth-child(even) {
 }
 
 	</style>
-	<script>
-const live_status_api = "/api/live_status"
+	<script type="module">
+import { live_status_api } from "/config.js";
 
 function live_time_str(start_time) {
 	let time_sec = Math.floor(Date.now() / 1000 - start_time)

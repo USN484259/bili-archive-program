@@ -52,6 +52,7 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 + video_fetch.html	视频缓存页面，输入BV号缓存视频，显示缓存状态
 + live_page.html	直播状态页面，显示monitor.py监控的直播间状态
 + live_danmaku.html	显示直播间实时弹幕，使用live_rec.py转发的弹幕信息
++ user_page.html	显示用户信息和动态
 
 ## 依赖表
 
@@ -62,24 +63,25 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 
 ### 工具模块
 
-|	项目		|	OS	|	Python3.8+	|	httpx		|	ffprobe		|	websockets	|	brotli	|
+|	项目		|	OS	|	Python		|	httpx		|	ffprobe		|	websockets	|	brotli	|
 |	----		|	----	|	----		|	----		|	----		|	----		|	----	|
-|	video.py	|	UNIX	|	M		|	M		|			|			|		|
-|	favlist.py	|	UNIX	|	M		|	M		|			|			|		|
-|	user.py		|	UNIX	|	M		|	M		|			|			|		|
-|	verify.py	|	any	|	M		|			|	O		|			|		|
-|	live_rec.py	|	UNIX	|	M		|	M		|			|	O		|	O	|
-|	monitor.py	|	UNIX	|	M		|	M		|			|			|		|
+|	video.py	|	UNIX	|	3.8+		|	M		|			|			|		|
+|	favlist.py	|	UNIX	|	3.8+		|	M		|			|			|		|
+|	user.py		|	UNIX	|	3.8+		|	M		|			|			|		|
+|	verify.py	|	any	|	3.8+		|			|	O		|			|		|
+|	live_rec.py	|	UNIX	|	3.8+		|	M		|			|	O		|	O	|
+|	monitor.py	|	UNIX	|	3.8+		|	M		|			|			|		|
 
 ### http后端
 
-|	项目		|	OS	|	Python3.8+	|	FastCGI		|	httpx		|	watchdog	|
+|	项目		|	OS	|	Python		|	FastCGI		|	httpx		|	watchdog	|
 |	----		|	----	|	----		|	----		|	----		|	----		|
-|	dir_listing.py	|	any	|	M		|	M		|			|			|
-|	zip_access.py	|	any	|	M		|	M		|			|			|
-|	video_cache.py	|	UNIX	|	M		|	M		|	M		|	O		|
-|	live_status.py	|	UNIX	|	M		|	M		|	M		|			|
-|	bili_proxy.py	|	any	|	M		|	M		|	M		|			|
+|	dir_listing.py	|	any	|	3.8+		|	M		|			|			|
+|	zip_access.py	|	any	|	3.8+		|	M		|			|			|
+|	video_cache.py	|	UNIX	|	3.8+		|	M		|	M		|	O		|
+|	live_status.py	|	UNIX	|	3.8+		|	M		|	M		|			|
+|	bili_proxy.py	|	any	|	3.8+		|	M		|	M		|			|
+|	image_cache.py	|	UNIX	|	3.8+		|	M		|	M		|			|
 
 ### http前端
 
@@ -91,13 +93,14 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 |	video_fetch.html	|	any	|	M		|			|			|
 |	live_page.html		|	any	|	M		|			|			|
 |	live_danmaku.html	|	any	|	M		|			|			|
+|	user_page.html		|	any	|	M		|			|			|
 
 ### 桌面应用
 
-|	项目			|	OS	|	Python3.8+	|	httpx		|	python3-gi	|	websockets	|	brotli	|
+|	项目			|	OS	|	Python		|	httpx		|	python3-gi	|	websockets	|	brotli	|
 |	----			|	----	|	----		|	----		|	----		|	----		|	----	|
-|	live_notify.py		|	Linux	|	M		|	M		|	M		|			|		|
-|	danmaku_reaction.py	|	Windows	|	M		|	M		|			|	M		|	M	|
+|	live_notify.py		|	Linux	|	3.8+		|	M		|	M		|			|		|
+|	danmaku_reaction.py	|	Windows	|	3.11+		|	M		|			|	M		|	M	|
 
 ### 移植提示
 
@@ -124,7 +127,7 @@ SHELL=/bin/bash
 
 ```sh
 # 安装软件包
-sudo apt install lighttpd python3-pip python3-httpx python3-watchdog python3-websockets
+sudo apt install lighttpd python3-pip python3-httpx python3-watchdog python3-websockets python3-brotli
 
 # 修改lighttpd服务
 sudo mkdir -p /etc/systemd/system/lighttpd.service.d/
@@ -143,9 +146,13 @@ for f in ../code/client/*.html
 do
 	ln -s $f
 done
-ln -s ../tmp/cache
 ln -s /PATH/TO/flv.min.js
 ln -s /PATH/TO/hls.min.js
+
+mkdir -p cache
+cd cache
+ln -s ../../tmp/video
+ln -s ../../tmp/image
 # 链接其他需要通过http访问的内容
 
 # 初始化fcgi目录
@@ -153,7 +160,7 @@ cd /srv/http/fcgi
 # 通过pip3安装fastcgi
 pip3 install --target /srv/http/fcgi --no-compile --no-deps fastcore fastcgi
 # httpx, watchdog, websockets 也可通过pip3安装
-# pip3 install --target /srv/http/fcgi --no-compile httpx watchdog websockets
+# pip3 install --target /srv/http/fcgi --no-compile httpx watchdog websockets brotli
 for f in constants.py core.py runtime.py network.py verify.py video.py
 do
 	ln -s ../code/$f

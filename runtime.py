@@ -87,7 +87,7 @@ def logging_init(level, /, log_file = None, *, no_stderr = False):
 		handler.addFilter(filter_func)
 
 
-def parse_args(std_args, extra_args = (), *, arg_list = None):
+def parse_args(std_args, extra_args = (), *, arg_list = None, opt_auth = False):
 	global http_timeout
 	global default_stall_time
 	global bandwidth_limit
@@ -128,7 +128,13 @@ def parse_args(std_args, extra_args = (), *, arg_list = None):
 
 	# keep credential safe, load after print
 	if getattr(args, "credential", None):
-		load_credential(args.credential)
+		try:
+			load_credential(args.credential)
+		except Exception as e:
+			if opt_auth:
+				logger.warning("cannot load credential, skipping: %s", str(e))
+			else:
+				raise
 
 	return args
 

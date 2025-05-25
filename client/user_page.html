@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8"/>
+</head>
+<body>
+	<div class="header-content">
+		<h1 id="uname"></h1>
+		<img id="face"/>
+		<span id="info"></span>
+		<span id="desc"></span>
+	</div>
+	<div class="main-content">
+		<div id="dynamic_container"></div>
+		<button id="dynamic_more">more</button>
+	</div>
+
+
+	<style>
+
+	</style>
+	<script type="module">
+
+import * as config from "/config.js"
+let util_module = import(config.util_module);
+
+const dynamic_list_url = "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space"
+
+
+function dyn_apply_common(div_elem, dyn) {
+	div_elem.id = dyn.id_str;
+
+	let uname_elem = document.createElement("span");
+	uname_elem.className = "dyn_uname";
+	uname_elem.append(dyn.modules.module_author.name);
+	div_elem.appendChild(uname_elem);
+
+	let face_elem = document.createElement("img");
+	face_elem.className = "dyn_face";
+	face_elem.setAttribute("loading", "lazy");
+	face_elem.src = util.make_image_url(dyn.modules.module_author.face);
+	div_elem.appendChild(face_elem);
+
+	let time_elem = document.createElement("span");
+	time_elem.className = "dyn_pubtime";
+	time_elem.append(new Date(dyn.modules.module_author.pub_ts * 1000).toLocaleString());
+	div_elem.appendChild(time_elem);
+
+	if (dyn.modules.module_stat) {
+		let stat_elem = document.createElement("span");
+		stat_elem.className = "dyn_stat";
+		stat_elem.append("" + dyn.modules.module_stat.like.count + " likes, " + dyn.modules.module_stat.comment.count + " comments, " + dyn.modules.module_stat.forward.count + " forwards");
+		div_elem.appendChild(stat_elem);
+	}
+}
+
+function dyn_apply_content(div_elem, content) {
+	let content_elem = document.createElement("div");
+	content_elem.className = "dyn_content";
+	let fallback_text_elem = document.createElement("p");
+	fallback_text_elem.append(content.desc.text);
+	content_elem.appendChild(fallback_text_elem);
+	try {
+		for (let node of content.desc.rich_text_nodes) {
+			let node_elem = undefined;
+			switch (node.type) {
+			case "RICH_TEXT_NODE_TYPE_EMOJI":
+				node_elem = document.createElement("img");
+				node_elem.setAttribute("loading", "lazy");
+				node_elem.src = util.make_image_url(node.emoji.icon_url);
+				break;
+			case "RICH_TEXT_NODE_TYPE_TEXT":
+			default:
+				node_elem = document.createElement("span");
+				node_elem.append(node.text);
+			}
+			content_elem.appendChild(node_elem);
+		}
+		if (content.major && content.major.type == "MAJOR_TYPE_DRAW") {
+			let gallery_elem = document.createElement("div");
+			gallery_elem.className = "dyn_gallery";
+			content_elem.appendChild(gallery_elem);
+			for (let item of content.major.draw.items) {
+				let image_elem = document.createElement("img");
+				image_elem.className = "dyn_image";
+				image_elem.setAttribute("loading", "lazy");
+				image_elem.src = util.make_image_url(item.src);
+				gallery_elem.appendChild(image_elem);
+			}
+		}
+		fallback_text_elem.hidden = true
+	} finally {
+		div_elem.appendChild(content_elem);
+	}
+}
+
+function dyn_apply_video(div_elem, content) {
+	let content_elem = document.createElement("div");
+	content_elem.className = "dyn_video";
+
+	let title_elem = document.createElement("span");
+	title_elem.className = "dyn_title";
+	title_elem.append(content.major.archive.title);
+	content_elem.appendChild(title_elem);
+
+	let schedule_elem = util.create_schedule_button(content.major.archive.bvid);
+	schedule_elem.className = "dyn_schedule";
+	content_elem.appendChild(schedule_elem);
+
+	let cover_elem = document.createElement("img");
+	cover_elem.className = "dyn_cover";
+	cover_elem.setAttribute("loading", "lazy");
+	cover_elem.src = util.make_image_url(content.major.archive.cover);
+	content_elem.appendChild(cover_elem);
+
+	div_elem.appendChild(content_elem);
+}
+
+function dyn_apply(div_elem, dyn) {
+	dyn_apply_common(div_elem, dyn);
+	switch (dyn.type) {
+	case "DYNAMIC_TYPE_DRAW":
+		dyn_apply_content(div_elem, dyn.modules.module_dynamic);
+		break;
+	case "DYNAMIC_TYPE_FORWARD":
+	{
+		dyn_apply_content(div_elem, dyn.modules.module_dynamic);
+		let orig_elem = document.createElement("div");
+		orig_elem.className = "dyn_orig";
+		div_elem.appendChild(orig_elem);
+		dyn_apply(orig_elem, dyn.orig);
+		break;
+	}
+	case "DYNAMIC_TYPE_AV":
+		dyn_apply_video(div_elem, dyn.modules.module_dynamic);
+		break;
+	}
+
+}
+
+function load_dynamic() {
+	let params = new URLSearchParams(document.location.search);
+	let uid = params.get("uid");
+
+	let button = document.getElementById("dynamic_more");
+	button.disabled = true;
+
+	let target_url = new URL(dynamic_list_url);
+	let search_params = new URLSearchParams({"host_mid": uid});
+	if (globalThis.dyn_cookie) {
+		search_params.append("offset", globalThis.dyn_cookie);
+	}
+	target_url.search = search_params.toString();
+	let proxy_url = util.make_proxy_url(target_url.toString());
+
+	fetch(proxy_url).then((resp) => {
+		if (resp.ok)
+			return resp.json();
+		else
+			throw new Error("Response status " + resp.status);
+	}).catch((err) => { button.disabled = false; }).then((resp) => {
+		try {
+			let container_elem = document.getElementById("dynamic_container");
+			for (let dyn of resp.data.items) {
+				let div_elem = document.createElement("div");
+				try {
+					dyn_apply(div_elem, dyn);
+				} finally {
+					container_elem.appendChild(div_elem);
+				}
+			}
+			globalThis.dyn_cookie = resp.data.offset;
+		} finally {
+			button.disabled = false;
+		}
+	});
+}
+
+addEventListener("DOMContentLoaded", () => util_module.then((util) => {
+	globalThis.util = util;
+	globalThis.dyn_cookie = null;
+	document.getElementById("dynamic_more").addEventListener("click", load_dynamic);
+	load_dynamic();
+}));
+
+	</script>
+</body>
+</html>

@@ -15,7 +15,10 @@ video {
 	left: 0;
 }
 	</style>
-	<script>
+	<script type="module">
+
+import * as config from "/config.js";
+
 
 function load_js(url, func, path) {
 	let scriptTag = document.createElement('script');
@@ -122,9 +125,9 @@ addEventListener("DOMContentLoaded", () => {
 	let path = document.location.search.match(path_pattern)[1];
 	if (path) {
 		if (path.endsWith(".flv"))
-			load_js("/flv.min.js", play_flv, path);
+			load_js(config.flv_module, play_flv, path);
 		else if (path.endsWith(".m3u8"))
-			load_js("/hls.min.js", play_hls, path);
+			load_js(config.hls_module, play_hls, path);
 		else
 			play_video(path);
 	}

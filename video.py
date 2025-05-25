@@ -36,8 +36,8 @@ logger = logging.getLogger("bili_arch.video")
 # helper functions
 
 async def get_bv_info(sess, bvid):
-	info = await network.request(sess, "GET", BV_INFO_URL, params = {"bvid": bvid})
-	return info
+	resp = await network.request(sess, "GET", BV_INFO_URL, params = {"bvid": bvid})
+	return resp.get("data")
 
 
 async def get_play_info(sess, bvid, cid):
@@ -48,8 +48,8 @@ async def get_play_info(sess, bvid, cid):
 		"qn": 112,
 		"fnval": 16,
 	}
-	info = await network.request(sess, "GET", PLAY_INFO_URL, params = params)
-	return info
+	resp = await network.request(sess, "GET", PLAY_INFO_URL, params = params)
+	return resp.get("data")
 
 
 # stub

@@ -79,6 +79,10 @@ class HttpResponseMixin:
 		elif code >= 400 and mime_type == "text/plain":
 			self["stdout"].write(resp_name.encode())
 
+	def send_redirect(self, target):
+		location_str = "Location: %s\r\n\r\n" % target
+		self["stdout"].write(location_str.encode())
+
 
 if __name__ == "__main__":
 	import os

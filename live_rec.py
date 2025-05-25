@@ -44,13 +44,13 @@ def get_url_path(base_url):
 
 
 async def get_live_info(sess, rid):
-	info = await network.request(sess, "GET", LIVE_QUERY_URL, params = {"room_id" : rid})
-	return info
+	resp = await network.request(sess, "GET", LIVE_QUERY_URL, params = {"room_id" : rid})
+	return resp.get("data")
 
 
 async def get_user_info(sess, uid):
-	info = await network.request(sess, "GET", LIVE_USER_URL, params = {"uid": uid})
-	return info
+	resp = await network.request(sess, "GET", LIVE_USER_URL, params = {"uid": uid})
+	return resp.get("data")
 
 
 async def get_live_url(sess, rid):
@@ -61,8 +61,8 @@ async def get_live_url(sess, rid):
 		"codec": "0,1",
 		"qn": 10000
 	}
-	info = await network.request(sess, "GET", LIVE_PLAY_URL, params = params)
-	return info
+	resp = await network.request(sess, "GET", LIVE_PLAY_URL, params = params)
+	return resp.get("data")
 
 
 def find_best_url(info, *, prefer = "", reject = ""):

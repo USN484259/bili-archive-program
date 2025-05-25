@@ -26,13 +26,13 @@ logger = logging.getLogger("bili_arch.favlist")
 # helper functions
 
 async def get_user_favlist(sess, uid):
-	info = await network.request(sess, "GET", USER_FAVLIST_URL, params = {"up_mid": uid})
-	return info
+	resp = await network.request(sess, "GET", USER_FAVLIST_URL, params = {"up_mid": uid})
+	return resp.get("data")
 
 
 async def get_favlist_page(sess, mid, page):
-	info = await network.request(sess, "GET", FAVLIST_CONTENT_URL, params = {"media_id": mid, "ps": 20, "pn": page})
-	return info
+	resp = await network.request(sess, "GET", FAVLIST_CONTENT_URL, params = {"media_id": mid, "ps": 20, "pn": page})
+	return resp.get("data")
 
 
 def save_favlist(favlist, path):

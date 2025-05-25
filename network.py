@@ -41,6 +41,9 @@ logger = logging.getLogger("bili_arch.network")
 wbi_pattern = re.compile(r"^.+/([^/.]+)\.[^/.]+$")
 wbi_cached_key = None
 
+class BiliApiError(RuntimeError):
+	pass
+
 ## wbi sign
 # https://github.com/SocialSisterYi/bilibili-API-collect/blob/master/docs/misc/sign/wbi.md
 
@@ -124,6 +127,7 @@ async def request(sess, method, url, /, wbi_sign = False, **kwargs):
 
 		response = await sess.request(method, url, **signed_args)
 		response.raise_for_status()
+
 		result = response.json()
 
 		code = result.get("code", -32768)
@@ -132,11 +136,11 @@ async def request(sess, method, url, /, wbi_sign = False, **kwargs):
 			retry = False
 			continue
 		elif code == 0:
-			return result.get("data")
+			return result
 
 		msg = result.get("msg") or result.get("message", "")
 		logger.error("response code %d, msg %s", code, msg)
-		raise RuntimeError(msg)
+		raise BiliApiError(msg)
 
 
 async def fetch(sess, url, path, **kwargs):

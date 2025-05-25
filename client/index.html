@@ -50,34 +50,16 @@ tbody tr:nth-child(even) {
 	background-color: #eeeeee;
 }
 	</style>
-	<script>
+	<script type="module">
 
-function size_postfix(size) {
-	const size_unit = [
-		" B",
-		" KiB",
-		" MiB",
-		" GiB",
-		" TiB",
-		" PiB"
-	];
-	let index = 0
-	let unit_base = 1
-	while (size >= unit_base * 0x400) {
-		if (index + 1 >= size_unit.length)
-			break
-		index += 1
-		unit_base *= 0x400
-	}
-	return (size / unit_base).toFixed(index > 0) + size_unit[index]
-}
+import * as config from "/config.js"
+let util_module = import(config.util_module);
 
 const path_pattern = new RegExp("^(.*/)[^/]+$")
 const parent_pattern = new RegExp("^(.*/)([^/]+)/$")
 
-let localtime = new Intl.DateTimeFormat(undefined, {dateStyle: "medium", timeStyle: "medium"})
-
-addEventListener("DOMContentLoaded", () => {
+addEventListener("DOMContentLoaded", () => util_module.then((util) => {
+	globalThis.util = util;
 	let path = document.location.pathname.split(path_pattern)[1]
 	let parent_path = null
 	if (path != "/") {
@@ -134,11 +116,11 @@ addEventListener("DOMContentLoaded", () => {
 			// size
 			let size_elem = document.createElement("td")
 			if (entry.type != "dir")
-				size_elem.append(size_postfix(entry.size))
+				size_elem.append(util.size_string(entry.size))
 
 			// mtime
 			let mtime_elem = document.createElement("td")
-			mtime_elem.append(localtime.format(new Date(entry.mtime)))
+			mtime_elem.append(util.localtime_string(entry.mtime))
 
 			// action
 			let action_elem = document.createElement("td")
@@ -150,14 +132,12 @@ addEventListener("DOMContentLoaded", () => {
 				action_elem.append(zip_elem)
 			} else if (name.toLowerCase().startsWith("bv") && name.endsWith('/')) {
 				let bv_elem = document.createElement("a")
-				let video_page_url = "/video_page.html?path=" + url
-				bv_elem.setAttribute("href", video_page_url)
+				bv_elem.setAttribute("href", util.make_video_url(url))
 				bv_elem.append("play")
 				action_elem.append(bv_elem)
 			} else if (name.endsWith(".flv") || name.endsWith(".m3u8")) {
 				let player_elem = document.createElement("a")
-				let player_url = "/player.html?path=" + url
-				player_elem.setAttribute("href", player_url)
+				player_elem.setAttribute("href", util.make_player_url(url))
 				player_elem.append("play")
 				action_elem.append(player_elem)
 			}
@@ -170,7 +150,7 @@ addEventListener("DOMContentLoaded", () => {
 		let summary_elem = document.getElementById("summary")
 		summary_elem.replaceChildren("total items: " + dir_list.length)
 	});
-});
+}));
 	</script>
 </body>
 </html>

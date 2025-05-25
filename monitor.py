@@ -26,8 +26,8 @@ scheduled_restart = False
 # helper functions
 
 async def get_live_status(sess, uid_list):
-	info_map = await network.request(sess, "POST", LIVE_STATUS_URL, json = {"uids": uid_list})
-	return info_map
+	resp = await network.request(sess, "POST", LIVE_STATUS_URL, json = {"uids": uid_list})
+	return resp.get("data")
 
 
 async def record_main(rid, path, rec_log, relay_path):

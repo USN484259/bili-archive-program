@@ -22,23 +22,23 @@ logger = logging.getLogger("bili_arch.collection")
 # helper functions
 
 async def get_video_page(sess, uid, page):
-	info = await network.request(sess, "GET", USER_VIDEO_LIST_URL, wbi_sign = True, params = {"mid": uid, "pn": page})
-	return info
+	resp = await network.request(sess, "GET", USER_VIDEO_LIST_URL, wbi_sign = True, params = {"mid": uid, "pn": page})
+	return resp.get("data")
 
 
 async def get_collections(sess, uid, page):
-	info = await network.request(sess, "GET", USER_COLLECTIONS_URL, wbi_sign = True, params = {"mid": uid, "page_num": page, "page_size": 20})
-	return info
+	resp = await network.request(sess, "GET", USER_COLLECTIONS_URL, wbi_sign = True, params = {"mid": uid, "page_num": page, "page_size": 20})
+	return resp.get("data")
 
 
 async def get_series_page(sess, uid, sid, page):
-	info = await network.request(sess, "GET", USER_SERIES_LIST_URL, wbi_sign = True, params = {"mid": uid, "series_id": sid, "pn": page})
-	return info
+	resp = await network.request(sess, "GET", USER_SERIES_LIST_URL, wbi_sign = True, params = {"mid": uid, "series_id": sid, "pn": page})
+	return resp.get("data")
 
 
 async def get_season_page(sess, uid, sid, page):
-	info = await network.request(sess, "GET", USER_SEASON_LIST_URL, wbi_sign = True, params = {"mid": uid, "season_id": sid, "page_num": page})
-	return info
+	resp = await network.request(sess, "GET", USER_SEASON_LIST_URL, wbi_sign = True, params = {"mid": uid, "season_id": sid, "page_num": page})
+	return resp.get("data")
 
 
 # methods
