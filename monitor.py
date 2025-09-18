@@ -21,6 +21,7 @@ LIVE_STATUS_URL = "https://api.live.bilibili.com/room/v1/Room/get_status_info_by
 
 logger = logging.getLogger("bili_arch.monitor")
 multiprocessing = multiprocessing.get_context("fork")
+scheduled_reload = False
 scheduled_restart = False
 
 # helper functions
@@ -136,6 +137,7 @@ async def monitor_check(sess, config):
 
 	logger.info("checking %d live rooms", len(uid_list))
 	info_map = await get_live_status(sess, uid_list)
+	hold_count = 0
 	active_rooms = []
 	remove_list = {}
 
@@ -143,17 +145,25 @@ async def monitor_check(sess, config):
 		for uid, record in config.records.items():
 			name = record.get("name", str(uid))
 
+			info = info_map.get(str(uid))
+			if info:
+				record["info"] = info
+			else:
+				logger.warning("no stat for %s(%d)", name, uid)
+
+			needs_remove = record.get("remove")
+
 			if not await task_cleanup(record):
 				active_rooms.append(name)
+				if not needs_remove:
+					hold_count += 1
 				continue
 
-			if record.get("remove"):
+			if needs_remove:
 				remove_list[uid] = name
 				continue
 
-			info = info_map.get(str(uid))
 			if not info:
-				logger.warning("no stat for %s(%d)", name, uid)
 				continue
 
 			rid = info.get("room_id", 0)
@@ -163,8 +173,6 @@ async def monitor_check(sess, config):
 			status = info.get("live_status", -1)
 
 			logger.debug("%s, room %d, status %d", name, rid, status)
-
-			record["info"] = info
 
 			if not record.get("record", True):
 				continue
@@ -180,6 +188,7 @@ async def monitor_check(sess, config):
 
 			await task_start(record, rid, rec_path, config.rec_log, config.relay_root)
 			active_rooms.append(name)
+			hold_count += 1
 
 		logger.info("active live rooms %d %s", len(active_rooms), " ".join(active_rooms))
 
@@ -188,10 +197,11 @@ async def monitor_check(sess, config):
 			assert(config.records[uid]["task"] is None)
 			del config.records[uid]
 
-		return len(active_rooms)
+		return hold_count
 
 
 async def monitor_task(config, interval):
+	global scheduled_reload
 	global scheduled_restart
 	async with network.session() as sess:
 		while True:
@@ -201,15 +211,24 @@ async def monitor_task(config, interval):
 			except Exception:
 				logger.exception("exception on monitor_check")
 
-			logger.info("sleep %d sec", interval)
-			await asyncio.sleep(interval)
-
 			if scheduled_restart and active_count == 0:
 				try:
 					exec_restart()
 				except Exception:
 					scheduled_restart = False
 					logger.exception("exception on restart")
+
+			elif scheduled_reload:
+				try:
+					await config.update()
+					continue
+				except Exception:
+					logger.exception("failed to reload config")
+				finally:
+					scheduled_reload = False
+
+			logger.info("sleep %d sec", interval)
+			await asyncio.sleep(interval)
 
 
 # entrance
@@ -219,8 +238,9 @@ async def main(args):
 	await config.update()
 
 	def sig_reload(signum, frame):
-		logger.info("reloading config")
-		asyncio.create_task(config.update())
+		global scheduled_reload
+		logger.info("reload scheduled")
+		scheduled_reload = True
 
 	def sig_restart(signum, frame):
 		global scheduled_restart

@@ -30,7 +30,7 @@ logger = logging.getLogger("bili_arch.live_danmaku")
 # helper functions
 
 async def get_live_danmaku_info(sess, rid):
-	resp = await network.request(sess, "GET", LIVE_DANMAKU_INFO_URL, params = {"id": rid})
+	resp = await network.request(sess, "GET", LIVE_DANMAKU_INFO_URL, wbi_sign = True, params = {"id": rid})
 	return resp.get("data")
 
 async def get_live_heartbeat(sess, rid, interval):

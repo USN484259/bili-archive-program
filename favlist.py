@@ -79,7 +79,7 @@ async def fetch_favlist(sess, mid, stall = None):
 			break
 
 	if favlist_info.get("media_count") != len(favlist):
-		logger.error("favlist %d: size mismatch %d/%d", mid, len(favlist), favlist_info.get("media_count"))
+		logger.warning("favlist %d: size mismatch %d/%d", mid, len(favlist), favlist_info.get("media_count"))
 
 	return {"info": favlist_info, "medias": favlist}
 
