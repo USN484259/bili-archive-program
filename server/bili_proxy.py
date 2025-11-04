@@ -11,8 +11,7 @@ import asyncio
 import logging
 from collections import namedtuple
 from urllib.parse import urlparse, unquote, parse_qs
-from fcgi_server import FcgiServer, HttpResponseMixin
-from fastcgi import FcgiHandler
+from simple_fastcgi import FcgiServer, HttpResponseMixin, FcgiHandler
 
 import constants
 import runtime

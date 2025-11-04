@@ -1,2 +1,2 @@
-fastcgi
+simple-fastcgi
 watchdog

@@ -4,14 +4,19 @@ import os
 import sys
 sys.path[0] = os.getcwd()
 
+import json
+import asyncio
+from functools import partial
 from urllib.parse import parse_qs
-from fcgi_server import FcgiThreadingServer, HttpResponseMixin
-from fastcgi import FcgiHandler
+
+from simple_fastcgi import AsyncFcgiServer, AsyncHttpResponseMixin, AsyncFcgiHandler
 
 
-def dir_listing(path):
-	result = []
+async def dir_listing(path, ndjson = False):
 	with os.scandir(path) as it:
+		prepend = ""
+		if not ndjson:
+			yield "[\n"
 		for entry in it:
 			record = {
 				"name": entry.name
@@ -29,24 +34,36 @@ def dir_listing(path):
 				record["mtime"] = int(stat.st_mtime * 1000)
 			except Exception:
 				pass
-			result.append(record)
 
-	return result
+			line = prepend + json.dumps(record, ensure_ascii = False) + '\n'
+			yield line
 
-class dir_listing_handler(HttpResponseMixin, FcgiHandler):
-	def handle(self):
+			if not ndjson:
+				prepend = ",\n"
+
+		if not ndjson:
+			yield "]\n"
+
+
+class dir_listing_handler(AsyncHttpResponseMixin, AsyncFcgiHandler):
+	async def handle(self):
 		try:
 			doc_root = self.environ["DOCUMENT_ROOT"]
+			accept = self.environ.get("HTTP_ACCEPT")
 			query = parse_qs(self.environ["QUERY_STRING"])
 			path = query["path"][0].lstrip("/.")
+			is_ndjson = (accept and "ndjson" in accept)
 
-			data = dir_listing(os.path.join(doc_root, path))
+			func = partial(dir_listing, os.path.join(doc_root, path), is_ndjson)
+			return await self.send_response(200, is_ndjson and "application/x-ndjson" or "application/json", data = func)
+		except Exception as e:
+			return await self.send_response(404)
 
-			return self.send_response(200, "application/json", data)
-		except Exception:
-			return self.send_response(404)
+
+async def main():
+	async with AsyncFcgiServer(dir_listing_handler) as server:
+		await server.serve_forever()
 
 
 if __name__ == "__main__":
-	with FcgiThreadingServer(dir_listing_handler) as server:
-		server.serve_forever()
+	asyncio.run(main())

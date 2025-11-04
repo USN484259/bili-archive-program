@@ -58,99 +58,158 @@ let util_module = import(config.util_module);
 const path_pattern = new RegExp("^(.*/)[^/]+$")
 const parent_pattern = new RegExp("^(.*/)([^/]+)/$")
 
-addEventListener("DOMContentLoaded", () => util_module.then((util) => {
-	globalThis.util = util;
-	let path = document.location.pathname.split(path_pattern)[1]
-	let parent_path = null
-	if (path != "/") {
-		parent_path = path.split(parent_pattern)[1]
+
+function add_parent_entry(tbody_elem, parent_path) {
+	if (parent_path) {
+		let url = parent_path + "index.html";
+		let tr_elem = tbody_elem.insertRow();
+		let td_elem = document.createElement("td");
+		let a_elem = document.createElement("a");
+		a_elem.setAttribute("href", url);
+		a_elem.append("../");
+		td_elem.append(a_elem);
+		tr_elem.append(td_elem);
+
+		for (let i = 0; i < 3; i++) {
+			tr_elem.append(document.createElement("td"));
+		}
+		return true;
+	} else {
+		return false;
 	}
-	console.log(path, parent_path)
-	let title_elem = document.getElementById("title")
-	title_elem.append("Index of " + decodeURIComponent(path))
+}
 
-	fetch(path).then((resp) => resp.json()).then((dir_list) => {
-		console.log(dir_list)
 
-		let table_elem = document.getElementById("dir_listing")
-		let tbody_elem = table_elem.getElementsByTagName("tbody")[0]
+function add_new_entry(tbody_elem, path, entry, index) {
+	// let tr_elem = document.createElement("tr");
+	let tr_elem = tbody_elem.insertRow(index);
 
-		if (parent_path) {
-			let url = parent_path + "index.html"
-			let tr_elem = document.createElement("tr")
-			let td_elem = document.createElement("td")
-			let a_elem = document.createElement("a")
-			a_elem.setAttribute("href", url)
-			a_elem.append("../")
-			td_elem.append(a_elem)
-			tr_elem.append(td_elem)
+	// name
+	let name_elem = document.createElement("td");
+	let a_elem = document.createElement("a");
+	let name = entry.name;
+	let url = path + encodeURIComponent(name);
 
-			for (let i = 0; i < 3; i++) {
-				tr_elem.append(document.createElement("td"))
+	if (entry.type == "dir") {
+		name += '/';
+		a_elem.setAttribute("href", url + "/index.html");
+	} else {
+		a_elem.setAttribute("href", url);
+	}
+	a_elem.append(name);
+	name_elem.append(a_elem);
+
+	// size
+	let size_elem = document.createElement("td");
+	if (entry.type != "dir")
+		size_elem.append(util.size_string(entry.size));
+
+	// mtime
+	let mtime_elem = document.createElement("td");
+	mtime_elem.append(util.localtime_string(entry.mtime));
+
+	// action
+	let action_elem = document.createElement("td");
+	if (name.endsWith(".zip")) {
+		let zip_elem = document.createElement("a")
+		let zip_url = url + "/index.html";
+		zip_elem.setAttribute("href", zip_url);
+		zip_elem.append("browse");
+		action_elem.append(zip_elem);
+	} else if (name.toLowerCase().startsWith("bv") && name.endsWith('/')) {
+		let bv_elem = document.createElement("a");
+		bv_elem.setAttribute("href", util.make_video_url(url));
+		bv_elem.append("play");
+		action_elem.append(bv_elem);
+	} else if (name.endsWith(".flv") || name.endsWith(".m3u8")) {
+		let player_elem = document.createElement("a");
+		player_elem.setAttribute("href", util.make_player_url(url));
+		player_elem.append("play");
+		action_elem.append(player_elem);
+	}
+
+	tr_elem.append(name_elem, size_elem, mtime_elem, action_elem);
+}
+
+function find_index(table, obj) {
+	let left = 0;
+	let right = table.length;
+	while (left < right) {
+		let mid = (left + right) >> 1;
+		if (table[mid].mtime < obj.mtime)
+			right = mid;
+		else
+			left = mid + 1;
+	}
+	table.splice(left, 0, obj);
+	return left;
+}
+
+async function main(util) {
+	globalThis.util = util;
+	let path = document.location.pathname.split(path_pattern)[1];
+	let parent_path = null;
+	if (path != "/") {
+		parent_path = path.split(parent_pattern)[1];
+	}
+	console.log(path, parent_path);
+	let title_elem = document.getElementById("title");
+	title_elem.append("Index of " + decodeURIComponent(path));
+
+	let resp = await fetch(path, {headers: { 'Accept': 'application/x-ndjson' }});
+	if (!resp.ok) {
+		throw new Error("" + resp.statusText + ": " + path);
+	}
+
+	let table_elem = document.getElementById("dir_listing");
+	let tbody_elem = table_elem.getElementsByTagName("tbody")[0];
+	let offset = add_parent_entry(tbody_elem, parent_path) ? 1 : 0;
+
+	let table = [];
+	let reader = resp.body.getReader();
+	let decoder = new TextDecoder('utf-8');
+	let buffer = '';
+	let count = 0;
+
+	while (true) {
+		let { value, done } = await reader.read();
+		if (done)
+			break;
+		console.log(value.length);
+		buffer += decoder.decode(value, { stream: true });
+		let lines = buffer.split('\n');
+		buffer = lines.pop();
+
+		for (let line of lines) {
+			try {
+				let obj = JSON.parse(line);
+				let index = find_index(table, obj);
+				add_new_entry(tbody_elem, path, obj, index + offset);
+				count += 1;
+			} catch (e) {
+				console.log(line, e);
 			}
-			tbody_elem.append(tr_elem)
 		}
+	}
 
-		dir_list.sort(function(a, b) {
-			return b.mtime - a.mtime
-		})
-
-		for (let entry of dir_list) {
-			let tr_elem = document.createElement("tr")
-
-			// name
-			let name_elem = document.createElement("td")
-			let a_elem = document.createElement("a")
-			let name = entry.name
-			let url = path + encodeURIComponent(name)
-
-			if (entry.type == "dir") {
-				name += '/';
-				a_elem.setAttribute("href", url + "/index.html")
-			} else {
-				a_elem.setAttribute("href", url)
-			}
-			a_elem.append(name)
-			name_elem.append(a_elem)
-
-			// size
-			let size_elem = document.createElement("td")
-			if (entry.type != "dir")
-				size_elem.append(util.size_string(entry.size))
-
-			// mtime
-			let mtime_elem = document.createElement("td")
-			mtime_elem.append(util.localtime_string(entry.mtime))
-
-			// action
-			let action_elem = document.createElement("td")
-			if (name.endsWith(".zip")) {
-				let zip_elem = document.createElement("a")
-				let zip_url = url + "/index.html"
-				zip_elem.setAttribute("href", zip_url)
-				zip_elem.append("browse")
-				action_elem.append(zip_elem)
-			} else if (name.toLowerCase().startsWith("bv") && name.endsWith('/')) {
-				let bv_elem = document.createElement("a")
-				bv_elem.setAttribute("href", util.make_video_url(url))
-				bv_elem.append("play")
-				action_elem.append(bv_elem)
-			} else if (name.endsWith(".flv") || name.endsWith(".m3u8")) {
-				let player_elem = document.createElement("a")
-				player_elem.setAttribute("href", util.make_player_url(url))
-				player_elem.append("play")
-				action_elem.append(player_elem)
-			}
-
-
-			tr_elem.append(name_elem, size_elem, mtime_elem, action_elem)
-			tbody_elem.append(tr_elem)
+	if (buffer.length > 0) {
+		try {
+			let obj = JSON.parse(buffer);
+			let index = find_index(table, obj);
+			add_new_entry(tbody_elem, path, obj, index + offset);
+			count += 1;
+		} catch (e) {
+			console.log(buffer, e);
 		}
+	}
 
-		let summary_elem = document.getElementById("summary")
-		summary_elem.replaceChildren("total items: " + dir_list.length)
-	});
-}));
+	let summary_elem = document.getElementById("summary")
+	summary_elem.replaceChildren("total items: " + count)
+
+}
+
+
+addEventListener("DOMContentLoaded", () => util_module.then(main));
 	</script>
 </body>
 </html>

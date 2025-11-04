@@ -46,8 +46,8 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 
 ## http前端使用说明
 
-+ index.html	目录索引，列出当前目录下的文件，对特定文件显示可用的操作
-+ player.html	通用播放器，播放 FLV / HLS / m4v+m4a
++ index.html		目录索引，列出当前目录下的文件，对特定文件显示可用的操作
++ player.html		通用播放器，播放 FLV / HLS / m4v+m4a
 + video_page.html	视频页面，显示BV基本信息，视频分P播放，获取相关推荐BV
 + video_fetch.html	视频缓存页面，输入BV号缓存视频，显示缓存状态
 + live_page.html	直播状态页面，显示monitor.py监控的直播间状态
@@ -74,7 +74,7 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 
 ### http后端
 
-|	项目		|	OS	|	Python		|	FastCGI		|	httpx		|	watchdog	|
+|	项目		|	OS	|	Python		|	simple-fastcgi	|	httpx		|	watchdog	|
 |	----		|	----	|	----		|	----		|	----		|	----		|
 |	dir_listing.py	|	any	|	3.8+		|	M		|			|			|
 |	zip_access.py	|	any	|	3.8+		|	M		|			|			|
@@ -157,8 +157,8 @@ ln -s ../../tmp/image
 
 # 初始化fcgi目录
 cd /srv/http/fcgi
-# 通过pip3安装fastcgi
-pip3 install --target /srv/http/fcgi --no-compile --no-deps fastcore fastcgi
+# 通过pip3安装simple-fastcgi
+pip3 install --target /srv/http/fcgi --no-compile --no-deps simple-fastcgi
 # httpx, watchdog, websockets 也可通过pip3安装
 # pip3 install --target /srv/http/fcgi --no-compile httpx watchdog websockets brotli
 for f in constants.py core.py runtime.py network.py verify.py video.py
@@ -222,8 +222,8 @@ python desktop/danmaku_reaction.py -u $HOME/bili-credential.txt config/danmaku.t
 + [Bilibili](https://www.bilibili.com) 哔哩哔哩 (゜-゜)つロ 干杯~
 + [Python](https://www.python.org/) is a programming language that lets you work quickly and integrate systems more effectively.
 + [httpx](https://www.python-httpx.org/) A next-generation HTTP client for Python.
-+ [FFmpeg](https://ffmpeg.org/) A complete, cross-platform solution to record, convert and stream audio and video. 
-+ [FastCGI](https://pypi.org/project/fastcgi/) FastCGI and HTTP handlers for Python's socketserver classes
++ [FFmpeg](https://ffmpeg.org/) A complete, cross-platform solution to record, convert and stream audio and video.
++ [simple-fastcgi](https://pypi.org/project/simple-fastcgi/) simple FastCGI protocol parser and sync/async handler in pure python
 + [watchdog](https://pypi.org/project/watchdog/) Python API and shell utilities to monitor file system events.
 + [websockets](https://pypi.org/project/websockets/) An implementation of the WebSocket Protocol
 + [flv.js](https://github.com/Bilibili/flv.js) An HTML5 Flash Video (FLV) Player written in pure JavaScript without Flash.
@@ -237,8 +237,9 @@ python desktop/danmaku_reaction.py -u $HOME/bili-credential.txt config/danmaku.t
 + [MDN Web Docs](https://developer.mozilla.org/) Documenting web technologies, including CSS, HTML, and JavaScript, since 2005.
 + [RFC 3875](https://www.rfc-editor.org/rfc/rfc3875): The Common Gateway Interface (CGI) Version 1.1
 + [FastCGI Specification](https://fast-cgi.github.io/spec.html) (Unofficial)
-+ [RFC 8216](https://www.rfc-editor.org/rfc/rfc8216): HTTP Live Streaming
++ [RFC 8216](https://www.rfc-editor.org/rfc/rfc8216) HTTP Live Streaming
 + [RFC 6455](https://www.rfc-editor.org/rfc/rfc6455) The WebSocket Protocol
++ [NDJSON](https://github.com/ndjson/ndjson-spec) A standard for delimiting JSON in stream protocols.
 + [TOML](https://toml.io) Tom's Obvious Minimal Language. A config file format for humans.
 + [btrfs](https://btrfs.wiki.kernel.org) is a modern copy on write (COW) filesystem for Linux aimed at implementing advanced features while also focusing on fault tolerance, repair and easy administration.
 

@@ -5,12 +5,12 @@ import sys
 sys.path[0] = os.getcwd()
 
 import re
+import json
 import time
 import zipfile
 import mimetypes
 from urllib.parse import parse_qs
-from fcgi_server import FcgiThreadingServer, HttpResponseMixin
-from fastcgi import FcgiHandler
+from simple_fastcgi import FcgiThreadingServer, HttpResponseMixin, FcgiHandler
 
 from threading import RLock
 from collections import OrderedDict
@@ -86,6 +86,7 @@ class zip_access_handler(HttpResponseMixin, FcgiHandler):
 			range_str = "Content-Range: bytes %d-%d/%d" % (range_head, range_tail - 1, file_size)
 			return self.send_response(206, mime_type = content_type, extra_headers = (length_str, range_str), data = file_content_gen)
 
+
 	def handle_dir(self, archive, path):
 		dir_list = []
 		for info in archive.infolist():
@@ -103,7 +104,15 @@ class zip_access_handler(HttpResponseMixin, FcgiHandler):
 		if not dir_list:
 			return self.send_response(404)
 		else:
-			return self.send_response(200, mime_type = "application/json", data = dir_list)
+			accept = self.environ.get("HTTP_ACCEPT")
+			if accept and "ndjson" in accept:
+				def gen():
+					for entry in dir_list:
+						yield json.dumps(entry, ensure_ascii = False) + '\n'
+
+				return self.send_response(200, mime_type = "application/x-ndjson", data = gen)
+			else:
+				return self.send_response(200, mime_type = "application/json", data = dir_list)
 
 
 	def handle_file(self, archive, filename):

@@ -8,8 +8,7 @@ import time
 import socket
 import argparse
 from contextlib import suppress
-from fcgi_server import FcgiServer, HttpResponseMixin
-from fastcgi import FcgiHandler
+from simple_fastcgi import FcgiServer, HttpResponseMixin, FcgiHandler
 
 class live_status_handler(HttpResponseMixin, FcgiHandler):
 	def handle(self):

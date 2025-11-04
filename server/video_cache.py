@@ -12,8 +12,7 @@ import multiprocessing
 from collections import deque
 from urllib.parse import parse_qs
 from contextlib import suppress
-from fcgi_server import FcgiServer, HttpResponseMixin
-from fastcgi import FcgiHandler
+from simple_fastcgi import FcgiServer, HttpResponseMixin, FcgiHandler
 
 # constants
 
@@ -179,7 +178,7 @@ class bv_play_handler(HttpResponseMixin, FcgiHandler):
 
 			else:	# POST
 				try:
-					query_str = self["stdin"].read().decode("utf-8")
+					query_str = self.read().decode("utf-8")
 					logger.info("query: %s", query_str)
 
 					query = parse_qs(query_str, keep_blank_values = True, strict_parsing = True)

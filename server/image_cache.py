@@ -10,8 +10,7 @@ import logging
 import argparse
 from urllib.parse import urlparse, unquote, parse_qs
 from contextlib import suppress
-from fcgi_server import FcgiServer, HttpResponseMixin
-from fastcgi import FcgiHandler
+from simple_fastcgi import FcgiServer, HttpResponseMixin, FcgiHandler
 
 
 # constants

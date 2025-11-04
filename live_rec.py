@@ -170,7 +170,7 @@ async def record_hls(sess, info, name_prefix):
 async def record_danmaku(rid, path, /, relay_path = None, *, fetch_images = True):
 	from live_danmaku import LiveDanmaku, DanmakuRelay
 
-	danmaku_file_name = os.path.join(path, "danmaku.json")
+	danmaku_file_name = os.path.join(path, "danmaku.ndjson")
 	logger.info("recording %s danmaku into %s", rid, danmaku_file_name)
 	with core.locked_file(danmaku_file_name, "a") as f:
 		async with AsyncExitStack() as stack:

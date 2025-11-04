@@ -82,6 +82,7 @@ tbody tr:nth-child(even) {
 	<script type="module">
 
 import * as config from "/config.js";
+const bv_url_pattern = RegExp("^https?://www.bilibili.com/video/(BV\\w+)")
 let util_module = import(config.util_module);
 
 class TaskList {
@@ -211,7 +212,11 @@ addEventListener("DOMContentLoaded", () => util_module.then((util) => {
 	form_elem.action = config.video_cache_api;
 	form_elem.addEventListener("submit", (ev) => {
 		ev.preventDefault();
-		let form_data = new FormData(ev.target)
+		let form_data = new FormData(ev.target);
+		let bvid = form_data.get("bvid");
+		let match = bvid.match(bv_url_pattern);
+		if (match)
+			form_data.set("bvid", match[1]);
 
 		for (let [name, value] of Array.from(form_data.entries())) {
 			if (value === '') form_data.delete(name);
