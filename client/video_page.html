@@ -108,76 +108,76 @@ const video_suggest_url = "https://api.bilibili.com/x/web-interface/archive/rela
 
 function show_suggestions(resp) {
 	if (resp.code != 0) {
-		console.log(info.message)
-		return
+		console.log(info.message);
+		return;
 	}
-	let suggestion_table = document.getElementById("suggestions")
-	let tbody_elem = document.createElement("tbody")
+	let suggestion_table = document.getElementById("suggestions");
+	let tbody_elem = document.createElement("tbody");
 	for (let info of resp.data) {
-		let tr_elem = document.createElement("tr")
+		let tr_elem = document.createElement("tr");
 
-		let img_td = document.createElement("td")
-		let pic_elem = document.createElement("picture")
-		let src_elem = document.createElement("source")
-		src_elem.setAttribute("srcset", util.make_image_url(info.pic, [160, 120]))
-		pic_elem.appendChild(src_elem)
+		let img_td = document.createElement("td");
+		let pic_elem = document.createElement("picture");
+		let src_elem = document.createElement("source");
+		src_elem.setAttribute("srcset", util.make_image_url(info.pic, [160, 120]));
+		pic_elem.appendChild(src_elem);
 
-		let img_elem = document.createElement("img")
-		img_elem.setAttribute("src", util.make_image_url(info.pic))
-		img_elem.setAttribute("loading", "lazy")
-		img_elem.setAttribute("width", 160)
-		img_elem.setAttribute("height", 120)
-		pic_elem.appendChild(img_elem)
-		img_td.appendChild(pic_elem)
-		tr_elem.appendChild(img_td)
+		let img_elem = document.createElement("img");
+		img_elem.setAttribute("src", util.make_image_url(info.pic));
+		img_elem.setAttribute("loading", "lazy");
+		img_elem.setAttribute("width", 160);
+		img_elem.setAttribute("height", 120);
+		pic_elem.appendChild(img_elem);
+		img_td.appendChild(pic_elem);
+		tr_elem.appendChild(img_td);
 
-		let title_elem = document.createElement("td")
-		title_elem.append(info.title)
-		tr_elem.appendChild(title_elem)
+		let title_elem = document.createElement("td");
+		title_elem.append(info.title);
+		tr_elem.appendChild(title_elem);
 
-		let author_elem = document.createElement("td")
-		author_elem.append(info.owner.name)
-		tr_elem.appendChild(author_elem)
+		let author_elem = document.createElement("td");
+		author_elem.append(info.owner.name);
+		tr_elem.appendChild(author_elem);
 
-		let duration_elem = document.createElement("td")
-		duration_elem.append(util.duration_string(info.duration))
-		tr_elem.appendChild(duration_elem)
+		let duration_elem = document.createElement("td");
+		duration_elem.append(util.duration_string(info.duration));
+		tr_elem.appendChild(duration_elem);
 
-		let stat_elem = document.createElement("td")
-		stat_elem.append(util.stat_string(info.stat.like) + '/' + util.stat_string(info.stat.view))
-		tr_elem.appendChild(stat_elem)
+		let stat_elem = document.createElement("td");
+		stat_elem.append(util.stat_string(info.stat.like) + '/' + util.stat_string(info.stat.view));
+		tr_elem.appendChild(stat_elem);
 
-		let action_td = document.createElement("td")
+		let action_td = document.createElement("td");
 
 		let action_form = util.create_schedule_button(info.bvid);
-		action_td.appendChild(action_form)
-		tr_elem.appendChild(action_td)
+		action_td.appendChild(action_form);
+		tr_elem.appendChild(action_td);
 
-		tbody_elem.appendChild(tr_elem)
+		tbody_elem.appendChild(tr_elem);
 	}
-	let old_tbody = suggestion_table.getElementsByTagName("tbody")[0]
-	suggestion_table.replaceChild(tbody_elem, old_tbody)
-	suggestion_table.removeAttribute("hidden")
+	let old_tbody = suggestion_table.getElementsByTagName("tbody")[0];
+	suggestion_table.replaceChild(tbody_elem, old_tbody);
+	suggestion_table.removeAttribute("hidden");
 }
 
 function load_video() {
-	const part_pattern = new RegExp("^#(\\d+)");
-	console.log(location.hash)
-	let match = location.hash.match(part_pattern)
+	const part_pattern = new RegExp("^#(P?\\d+)");
+	console.log(location.hash);
+	let match = location.hash.match(part_pattern);
 	if (!match)
 		return false;
 	let part_id = match[1];
-	let cid_elem = document.getElementById('P' + part_id)
-	let path = cid_elem.textContent
-	console.log(path)
-	let old_frame = document.getElementById("frame")
-	let frame = document.createElement("iframe")
-	frame.setAttribute("id", "frame")
-	frame.setAttribute("allow", "fullscreen")
-	frame.setAttribute("src", util.make_player_url(path))
-	old_frame.replaceWith(frame)
+	let cid_elem = document.getElementById(part_id);
+	let path = cid_elem.textContent;
+	console.log(path);
+	let old_frame = document.getElementById("frame");
+	let frame = document.createElement("iframe");
+	frame.setAttribute("id", "frame");
+	frame.setAttribute("allow", "fullscreen");
+	frame.setAttribute("src", util.make_player_url(path));
+	old_frame.replaceWith(frame);
 
-	frame.focus({preventScroll: true})
+	frame.focus({preventScroll: true});
 	return true;
 }
 
@@ -185,87 +185,130 @@ window.addEventListener("hashchange", load_video);
 
 function on_link_part(ev) {
 	ev.preventDefault();
-	console.log(ev.currentTarget.href)
-	location.replace(ev.currentTarget.hash)
+	console.log(ev.currentTarget.href);
+	location.replace(ev.currentTarget.hash);
 }
 
-addEventListener("DOMContentLoaded", () => util_module.then((util) => {
+function add_part(list_elem, path, part) {
+	console.log(part);
+	let part_id = part.page;
+	let li_elem = document.createElement("li");
+	let part_elem = document.createElement("a");
+	if (part_id == 0)
+		part_elem.setAttribute("href", '#' + part.cid.toString());
+	else
+		part_elem.setAttribute("href", '#P' + part_id.toString());
+
+	let title_elem = document.createElement("span");
+	title_elem.append(part.part);
+	let duration_elem = document.createElement("span");
+	duration_elem.setAttribute("class", "duration");
+	if ("duration" in part)
+		duration_elem.append(util.duration_string(part.duration));
+	else
+		duration_elem.append("?");
+
+	part_elem.appendChild(title_elem);
+	part_elem.appendChild(duration_elem);
+
+	let cid_elem = document.createElement("input");
+	cid_elem.setAttribute("type", "hidden");
+	if (part_id == 0)
+		cid_elem.setAttribute("id", part.cid.toString());
+	else
+		cid_elem.setAttribute("id", 'P' + part_id.toString());
+
+	cid_elem.append(path + part.cid);
+
+	li_elem.appendChild(part_elem);
+	li_elem.appendChild(cid_elem);
+	list_elem.appendChild(li_elem);
+
+	part_elem.addEventListener("click", on_link_part);
+}
+
+async function main(util) {
 	globalThis.util = util;
 	const path_pattern = new RegExp("[&?]path=(.+)");
 	let path = document.location.search.match(path_pattern)[1];
 	if (!path.endsWith('/'))
-		path += '/'
-	fetch(path + "info.json").then((resp) => resp.json()).then((info) => {
-		let bvid = info.bvid;
-		document.getElementById("suggest").addEventListener("click", (ev) => {
-			let target_url = new URL(video_suggest_url)
-			target_url.search = new URLSearchParams({"bvid": bvid}).toString();
+		path += '/';
 
-			let proxy_url = util.make_proxy_url(target_url.toString())
+	let info_resp = await fetch(path + "info.json");
+	if (!info_resp.ok) {
+		throw new Error("" + resp.statusText + ": " + path);
+	}
+	let info = await info_resp.json();
+	let listing_resp = await fetch(path);
+	let cid_set = new Set();
+	try {
+		for (let entry of await listing_resp.json()) {
+			if (entry.type != "dir")
+				continue;
+			let cid = Number(entry.name);
+			if (cid != NaN)
+				cid_set.add(cid);
 
-			fetch(proxy_url).then((resp) => {
-				if (resp.ok)
-					return resp.json();
-				else
-					throw new Error("Response status " + resp.status)
-			}).then(show_suggestions)
+		}
+	} catch (e) {}
+
+	let bvid = info.bvid;
+	document.getElementById("suggest").addEventListener("click", (ev) => {
+		let target_url = new URL(video_suggest_url);
+		target_url.search = new URLSearchParams({"bvid": bvid}).toString();
+
+		let proxy_url = util.make_proxy_url(target_url.toString());
+
+		fetch(proxy_url).then((resp) => {
+			if (resp.ok)
+				return resp.json();
+			else
+				throw new Error("Response status " + resp.status);
+		}).then(show_suggestions);
+	})
+
+	document.getElementById("title").append(info.title);
+	document.getElementById("stat").append("likes/views: " + util.stat_string(info.stat.like) + '/' + util.stat_string(info.stat.view));
+	document.getElementById("uptime").append(new Date(info.pubdate * 1000).toLocaleString());
+	document.getElementById("bvid").append(info.bvid);
+
+	// authors
+	let authors = ""
+	if (info.staff) {
+		for (let coop of info.staff) {
+			authors += " " + coop.name;
+		}
+	} else {
+		authors = info.owner.name;
+	}
+	document.getElementById("author").append(authors);
+	document.getElementById("desc").append(info.desc);
+
+	// parts
+	let list_elem = document.getElementById("parts");
+	for (let part of info.pages) {
+		add_part(list_elem, path, part);
+		cid_set.delete(part.cid);
+	}
+	for (let cid of cid_set) {
+		add_part(list_elem, path, {
+			"page": 0,
+			"cid": cid,
+			"part": cid.toString(),
 		})
+	}
 
-		document.getElementById("title").append(info.title)
-		document.getElementById("stat").append("likes/views: " + util.stat_string(info.stat.like) + '/' + util.stat_string(info.stat.view))
-		document.getElementById("uptime").append(new Date(info.pubdate * 1000).toLocaleString())
-		document.getElementById("bvid").append(info.bvid)
+	if (!load_video()) {
+		// cover
+		let cover_name = info.pic.split('/').pop();
+		let cover_path = path + cover_name;
+		let frame = document.getElementById("frame");
+		frame.setAttribute("src", cover_path);
+	}
 
-		// authors
-		let authors = ""
-		if (info.staff) {
-			for (let coop of info.staff) {
-				authors += " " + coop.name
-			}
-		} else {
-			authors = info.owner.name
-		}
-		document.getElementById("author").append(authors)
-		document.getElementById("desc").append(info.desc)
+}
 
-		// parts
-		let list_elem = document.getElementById("parts")
-		for (let part of info.pages) {
-			let part_id = part.page.toString()
-			let li_elem = document.createElement("li")
-			let part_elem = document.createElement("a")
-			part_elem.setAttribute("href", '#' + part_id)
-			let title_elem = document.createElement("span")
-			title_elem.append(part.part)
-			let duration_elem = document.createElement("span")
-			duration_elem.setAttribute("class", "duration")
-			duration_elem.append(util.duration_string(part.duration))
-
-			part_elem.appendChild(title_elem)
-			part_elem.appendChild(duration_elem)
-
-			let cid_elem = document.createElement("input")
-			cid_elem.setAttribute("type", "hidden")
-			cid_elem.setAttribute("id", 'P' + part_id)
-
-			cid_elem.append(path + part.cid)
-
-			li_elem.appendChild(part_elem)
-			li_elem.appendChild(cid_elem)
-			list_elem.appendChild(li_elem)
-
-			part_elem.addEventListener("click", on_link_part)
-		}
-
-		if (!load_video()) {
-			// cover
-			let cover_name = info.pic.split('/').pop()
-			let cover_path = path + cover_name
-			let frame = document.getElementById("frame")
-			frame.setAttribute("src", cover_path)
-		}
-	});
-}));
+addEventListener("DOMContentLoaded", () => util_module.then(main));
 
 	</script>
 </body>

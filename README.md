@@ -10,12 +10,14 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 
 ### 模块概述
 
-+ video.py	下载视频，更新本地视频存档
-+ favlist.py	下载收藏夹信息和视频
-+ user.py	下载用户信息和投稿视频
-+ verify.py	验证本地视频完整性
-+ live_rec.py	直播录制，支持FLV/HLS直播流，支持录制弹幕，转发弹幕数据
-+ monitor.py	直播间批量监控和录制
++ video.py		下载视频，更新本地视频存档
++ favlist.py		下载收藏夹信息和视频
++ user.py		下载用户信息和投稿视频
++ verify.py		验证本地视频完整性
++ live_rec.py		直播录制，支持FLV/HLS直播流，支持录制弹幕，转发弹幕数据
++ monitor.py		直播间批量监控和录制
++ cache_db.py		将视频信息缓存进数据库
++ merge_video.py	将缓存的视频合并进主视频存储中
 
 ### 常见参数说明
 
@@ -71,6 +73,8 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 |	verify.py	|	any	|	3.8+		|			|	O		|			|		|
 |	live_rec.py	|	UNIX	|	3.8+		|	M		|			|	O		|	O	|
 |	monitor.py	|	UNIX	|	3.8+		|	M		|			|			|		|
+|	cache_db.py	|	any	|	3.8+		|			|			|			|		|
+|	merge_video.py	|	any	|	3.8+		|			|			|			|		|
 
 ### http后端
 

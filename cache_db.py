@@ -139,10 +139,14 @@ class VideoDatabase:
 		self.database.row_factory = VideoDatabase.dict_factory
 
 	def close(self):
-		try:
-			self.database.close()
-		finally:
-			self.database = None
+		if self.database:
+			try:
+				self.database.close()
+			finally:
+				self.database = None
+
+	def __del__(self):
+		self.close()
 
 	def query(self, rules = {}):
 		sql = "SELECT * FROM %s" % view_table_name
