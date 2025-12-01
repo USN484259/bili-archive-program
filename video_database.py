@@ -11,6 +11,7 @@ import logging
 import sqlite3
 import argparse
 from stat import S_ISREG
+from contextlib import suppress
 from collections import defaultdict
 
 import constants
@@ -112,7 +113,7 @@ order_keys = ("mtime", "tags", "parts", "duration", "ctime", "pubtime", "views",
 
 # static objects
 
-logger = logging.getLogger("cache_db")
+logger = logging.getLogger("bili_arch.video_database")
 
 order_pattern = re.compile(r"([+-]?)(\w+)")
 cid_pattern = re.compile(r"(\d+)")
@@ -149,12 +150,13 @@ class VideoDatabase:
 		self.close()
 
 	def query(self, rules = {}):
-		sql = "SELECT * FROM %s" % view_table_name
-
 		cond_list = []
 		arg_list = []
 		order_key = "mtime"
 		order_dir = "DESC"
+		offset = 0
+		limit = None
+		count = False
 
 		for k, v in rules.items():
 			if k == "order":
@@ -162,13 +164,22 @@ class VideoDatabase:
 				if order_match:
 					dir = order_match.group(1)
 					key = order_match.group(2)
-				if key in order_keys:
-					order_key = key
-					if dir == '-':
-						order = "DESC"
-					else:
-						order = "ASC"
-					continue
+					if key in order_keys:
+						order_key = key
+						if dir == '-':
+							order = "DESC"
+						else:
+							order = "ASC"
+						continue
+			elif k == "offset":
+				offset = int(v)
+				continue
+			elif k == "limit":
+				limit = int(v)
+				continue
+			elif k == "count":
+				count = bool(int(v))
+				continue
 
 			verb = query_keys.get(k)
 			if not verb:
@@ -176,10 +187,16 @@ class VideoDatabase:
 			cond_list.append("%s %s" % (k, verb))
 			arg_list.append(v)
 
+		sql = "SELECT %s FROM %s" % (count and "COUNT(*) as count" or "*", view_table_name)
+
 		if cond_list:
 			sql += " WHERE " + " AND ".join(cond_list)
 
-		sql += " ORDER BY %s %s" % (order_key, order_dir)
+		if not count:
+			sql += " ORDER BY %s %s" % (order_key, order_dir)
+
+			if limit or offset:
+				sql += " LIMIT %d OFFSET %d" % (limit or -1, offset)
 
 		cursor = self.database.cursor()
 		try:
@@ -234,6 +251,7 @@ class VideoDatabaseManager(VideoDatabase):
 		cursor = self.database.cursor()
 		try:
 			cursor.execute("PRAGMA journal_mode = WAL;")
+			cursor.execute("PRAGMA persistent_wal = 1;")
 			cursor.execute("PRAGMA foreign_keys = ON;")
 			self.init_tables(cursor, update_path)
 		finally:

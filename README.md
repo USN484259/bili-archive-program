@@ -16,7 +16,8 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 + verify.py		验证本地视频完整性
 + live_rec.py		直播录制，支持FLV/HLS直播流，支持录制弹幕，转发弹幕数据
 + monitor.py		直播间批量监控和录制
-+ cache_db.py		将视频信息缓存进数据库
++ video_database.py	将视频信息缓存进SQLite数据库
++ database_daemon.py	监视视频目录并自动更新数据库
 + merge_video.py	将缓存的视频合并进主视频存储中
 
 ### 常见参数说明
@@ -65,16 +66,17 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 
 ### 工具模块
 
-|	项目		|	OS	|	Python		|	httpx		|	ffprobe		|	websockets	|	brotli	|
-|	----		|	----	|	----		|	----		|	----		|	----		|	----	|
-|	video.py	|	UNIX	|	3.8+		|	M		|			|			|		|
-|	favlist.py	|	UNIX	|	3.8+		|	M		|			|			|		|
-|	user.py		|	UNIX	|	3.8+		|	M		|			|			|		|
-|	verify.py	|	any	|	3.8+		|			|	O		|			|		|
-|	live_rec.py	|	UNIX	|	3.8+		|	M		|			|	O		|	O	|
-|	monitor.py	|	UNIX	|	3.8+		|	M		|			|			|		|
-|	cache_db.py	|	any	|	3.8+		|			|			|			|		|
-|	merge_video.py	|	any	|	3.8+		|			|			|			|		|
+|	项目			|	OS	|	Python		|	httpx		|	ffprobe		|	websockets	|	brotli	|	simple_inotify	|	psutil	|
+|	----			|	----	|	----		|	----		|	----		|	----		|	----	|	----		|	----	|
+|	video.py		|	UNIX	|	3.8+		|	M		|			|			|		|			|		|
+|	favlist.py		|	UNIX	|	3.8+		|	M		|			|			|		|			|		|
+|	user.py			|	UNIX	|	3.8+		|	M		|			|			|		|			|		|
+|	verify.py		|	any	|	3.8+		|			|	O		|			|		|			|		|
+|	live_rec.py		|	UNIX	|	3.8+		|	M		|			|	O		|	O	|			|		|
+|	monitor.py		|	UNIX	|	3.8+		|	M		|			|			|		|			|		|
+|	video_database.py	|	any	|	3.8+		|			|			|			|		|			|		|
+|	database_daemon.py	|	Linux	|	3.8+		|			|			|			|		|	M		|	O	|
+|	merge_video.py		|	any	|	3.8+		|			|			|			|		|			|		|
 
 ### http后端
 
@@ -112,7 +114,8 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 + `multiprocessing` 创建子进程时使用`fork`方式，部分代码依赖`fork(2)`的行为
 + `core.locked_path` 使用 `flock(2)` 锁定文件
 + 使用 `AF_UNIX` 套接字进行本地通信
-+ 使用 `SIGUSR1`, `SIGUSR2` 信号触发特定操作
++ 使用 `signal(7)` 信号触发特定操作或中断系统调用
++ 使用平台特定API如 `inotify(7)` `timerfd_create(2)` `eventfd(2)`
 + 部署方案中使用了 *symbolic link*, *tmpfs*, *bind mount*
 
 
@@ -228,10 +231,13 @@ python desktop/danmaku_reaction.py -u $HOME/bili-credential.txt config/danmaku.t
 + [httpx](https://www.python-httpx.org/) A next-generation HTTP client for Python.
 + [FFmpeg](https://ffmpeg.org/) A complete, cross-platform solution to record, convert and stream audio and video.
 + [simple-fastcgi](https://pypi.org/project/simple-fastcgi/) simple FastCGI protocol parser and sync/async handler in pure python
++ [simple_inotify](https://pypi.org/project/simple-inotify/) Very thin inotify(7) wrapper for Linux.
 + [watchdog](https://pypi.org/project/watchdog/) Python API and shell utilities to monitor file system events.
++ [psutil](https://pypi.org/project/psutil/) is a cross-platform library for retrieving information on running processes and system utilizationin Python.
 + [websockets](https://pypi.org/project/websockets/) An implementation of the WebSocket Protocol
 + [flv.js](https://github.com/Bilibili/flv.js) An HTML5 Flash Video (FLV) Player written in pure JavaScript without Flash.
 + [hls.js](https://github.com/video-dev/hls.js) is a JavaScript library that implements an HTTP Live Streaming client.
++ [SQLite](https://sqlite.org/) is a C-language library that implements a small, fast, self-contained, high-reliability, full-featured, SQL database engine.
 + [lighttpd](https://www.lighttpd.net/) is a secure, fast, compliant, and very flexible web server that has been optimized for high-performance environments.
 
 ### 其他链接
