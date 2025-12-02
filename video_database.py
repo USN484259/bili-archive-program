@@ -103,13 +103,14 @@ db_tables = {
 }
 
 query_keys = {
-	"bvid": "== ?",
-	"title": r"LIKE %?%",
-	"tags": r"LIKE %?%",
-	"uname": r"LIKE %?%",
+	"bvid": "==",
+	"title": "LIKE",
+	"tags": "LIKE",
+	"uname": "LIKE",
+	"desc": "LIKE",
 }
 
-order_keys = ("mtime", "tags", "parts", "duration", "ctime", "pubtime", "views", "uid")
+order_keys = ("mtime", "title", "tags", "parts", "duration", "ctime", "pubtime", "views", "uname", "uid")
 
 # static objects
 
@@ -120,6 +121,23 @@ cid_pattern = re.compile(r"(\d+)")
 
 def empty_func(*args):
 	pass
+
+
+# helper functions
+
+# To open a WAL mode database read-only, the calling process should be able to either open the
+# wal and shm file read-only, or create them. However by default, SQLite would auto checkpoint
+# and delete these two files on closing the connection. We need to tell SQLite not do this.
+# To achieve this, we need to call sqlite3_file_control() C API with SQLITE_FCNTL_PERSIST_WAL
+# https://sqlite.org/c3ref/c_fcntl_begin_atomic_write.html#sqlitefcntlpersistwal
+
+# However, sqlite3 module currently do not expose this interface
+# https://github.com/python/cpython/pull/128507
+
+def set_persist_wal(database):
+	logger.debug("FIXME: set_persist_wal not implemented")
+	pass
+
 
 # classes
 
@@ -135,19 +153,29 @@ class VideoDatabase:
 		return sqlite3.connect("file:%s?mode=ro" % db_file, uri = True, check_same_thread = False)
 
 	def __init__(self, db_file):
+		self.database = None
 		assert(sqlite3.threadsafety == 3)
 		self.database = self.connect(db_file)
+		set_persist_wal(self.database)
 		self.database.row_factory = VideoDatabase.dict_factory
 
+
+	def __del__(self):
+		self.close()
+
+	def __enter__(self):
+		return self
+
+	def __exit__(self, *args):
+		self.close()
+
 	def close(self):
-		if self.database:
+		if self.database is not None:
 			try:
 				self.database.close()
 			finally:
 				self.database = None
 
-	def __del__(self):
-		self.close()
 
 	def query(self, rules = {}):
 		cond_list = []
@@ -167,9 +195,9 @@ class VideoDatabase:
 					if key in order_keys:
 						order_key = key
 						if dir == '-':
-							order = "DESC"
+							order_dir = "DESC"
 						else:
-							order = "ASC"
+							order_dir = "ASC"
 						continue
 			elif k == "offset":
 				offset = int(v)
@@ -184,24 +212,38 @@ class VideoDatabase:
 			verb = query_keys.get(k)
 			if not verb:
 				raise KeyError("invalid key %s" % k)
-			cond_list.append("%s %s" % (k, verb))
+			cond_list.append("%s %s ?" % (k, verb))
+			if verb == "LIKE":
+				v = "%%%s%%" % v
 			arg_list.append(v)
 
-		sql = "SELECT %s FROM %s" % (count and "COUNT(*) as count" or "*", view_table_name)
+		if count:
+			sql = "SELECT COUNT(*) as count FROM ( SELECT * FROM "
+		else:
+			sql = "SELECT * FROM "
+
+		sql += view_table_name
 
 		if cond_list:
 			sql += " WHERE " + " AND ".join(cond_list)
 
-		if not count:
+		sql += " GROUP BY bvid "
+
+		if count:
+			sql += ")"
+		else:
 			sql += " ORDER BY %s %s" % (order_key, order_dir)
 
 			if limit or offset:
 				sql += " LIMIT %d OFFSET %d" % (limit or -1, offset)
 
+		logger.debug(sql)
+		logger.debug(arg_list)
+
 		cursor = self.database.cursor()
 		try:
 			cursor.arraysize = 0x40
-			cursor.execute(sql, *arg_list)
+			cursor.execute(sql, arg_list)
 			return cursor.fetchall()
 		finally:
 			cursor.close()
@@ -251,7 +293,6 @@ class VideoDatabaseManager(VideoDatabase):
 		cursor = self.database.cursor()
 		try:
 			cursor.execute("PRAGMA journal_mode = WAL;")
-			cursor.execute("PRAGMA persistent_wal = 1;")
 			cursor.execute("PRAGMA foreign_keys = ON;")
 			self.init_tables(cursor, update_path)
 		finally:

@@ -276,7 +276,9 @@ async function main(util) {
 	let authors = ""
 	if (info.staff) {
 		for (let coop of info.staff) {
-			authors += " " + coop.name;
+			if (authors != "")
+				authors += " ";
+			authors += coop.name;
 		}
 	} else {
 		authors = info.owner.name;

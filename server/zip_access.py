@@ -162,7 +162,9 @@ class zip_access_handler(HttpResponseMixin, FcgiHandler):
 
 			www_root = self.environ.get("DOCUMENT_ROOT")
 			query = parse_qs(self.environ.get("QUERY_STRING"), strict_parsing = True)
-			zip_path = query.get("path")[0]
+			zip_path = query.get("path")[0].lstrip("/.")
+			if ".." in zip_path:
+				raise RuntimeError("invalid zip path %s" % zip_path)
 			zip_member = query.get("member")[0].lstrip("/.")
 			if not zip_member:
 				zip_member = "/"

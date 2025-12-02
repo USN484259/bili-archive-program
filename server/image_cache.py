@@ -6,11 +6,13 @@ sys.path[0] = os.getcwd()
 
 import re
 import httpx
+import asyncio
 import logging
 import argparse
+from collections import OrderedDict
 from urllib.parse import urlparse, unquote, parse_qs
 from contextlib import suppress
-from simple_fastcgi import FcgiServer, HttpResponseMixin, FcgiHandler
+from simple_fastcgi import AsyncFcgiServer, AsyncHttpResponseMixin, AsyncFcgiHandler
 
 
 # constants
@@ -25,73 +27,118 @@ image_url_pattern = re.compile(r"^http[s]?://[^/]+[.]hdslb[.]com/.+$")
 
 # server & handler
 
-class ImageCacheServer(FcgiServer):
+class ImageCacheServer(AsyncFcgiServer):
 	def __init__(self, handler, cache_root, /, cache_size = None, timeout = 30):
-		FcgiServer.__init__(self, handler)
+		super().__init__(handler)
 		self.cache_root = cache_root
-		self.sess = httpx.Client(headers = constants.USER_AGENT, timeout = timeout, follow_redirects = True)
+		self.cache_size = cache_size
+		self.used_size = 0
+		self.cache_table = OrderedDict()
+		self.sess = httpx.AsyncClient(headers = constants.USER_AGENT, timeout = timeout, follow_redirects = True)
 		if cache_size:
-			from cache_folder import cache_folder
-			self.image_cache = cache_folder(cache_root, cache_size, self.cache_del_func)
+			self.scan_cache()
 
-	@staticmethod
-	def cache_del_func(root, path, stat):
-		name = os.path.join(root, path)
-		logger.debug("removing %s", name)
-		with suppress(OSError):
-			os.remove(name)
-		return True
+	def scan_cache(self):
+		result = []
+		with os.scandir(self.cache_root) as it:
+			for entry in it:
+				with suppress(Exception):
+					if not entry.is_file():
+						continue
+					stat = entry.stat()
+					result.append((
+						entry.name,
+						stat.st_size,
+						int(stat.st_mtime * 1000)
+					))
+		result.sort(key = lambda e: e[2])
+		for entry in result:
+			self.cache_table[entry[0]] = entry[1]
 
-	def get(self, url):
+	async def fetch(self, url, path):
+		async with self.sess.stream("GET", url) as resp:
+			resp.raise_for_status()
+			size = 0
+			with open(path, "xb") as f:
+				async for chunk in resp.aiter_bytes():
+					f.write(chunk)
+					size += len(chunk)
+			return size
+
+	def drop_unused(self):
+		while self.cache_table and self.used_size > self.cache_size:
+			filename, size = self.cache_table.popitem(last = False)
+			if asyncio.isfuture(size):
+				logger.warning("got task when removing %s", filename)
+				continue
+			assert(isinstance(size, int))
+			cache_file = os.path.join(self.cache_root, filename)
+			logger.debug("removing %s", name)
+			with suppress(OSError):
+				os.remove(name)
+			self.used_size -= size
+
+	async def get(self, url):
 		url_info = urlparse(url)
 		filename = os.path.split(url_info.path)[1]
+		record = self.cache_table.get(filename)
+		if record is not None and asyncio.isfuture(record):
+			with suppress(Exception):
+				await record
+
 		cache_file = os.path.join(self.cache_root, filename)
 		has_file = os.access(cache_file, os.F_OK)
+
 		if not has_file:
 			try:
-				self.fetch(url, cache_file)
+				task = asyncio.create_task(self.fetch(url, cache_file))
+				self.cache_table[filename] = task
+				size = await task
+				self.cache_table[filename] = size
+				self.used_size += size
+				if self.cache_size:
+					self.drop_unused()
 				has_file = os.access(cache_file, os.F_OK)
+
 			except Exception as e:
 				logger.error(str(e))
 
-		return has_file and cache_file or None
-
-	def fetch(self, url, path):
-		with self.sess.stream("GET", url) as resp:
-			resp.raise_for_status()
-			with open(path, "xb") as f:
-				for chunk in resp.iter_bytes():
-					f.write(chunk)
+		if has_file:
+			with suppress(KeyError):
+				self.cache_table.move_to_end(filename, last = True)
+			return cache_file
+		else:
+			del self.cache_table[filename]
 
 
-class image_cache_handler(HttpResponseMixin, FcgiHandler):
-	def handle(self):
+class image_cache_handler(AsyncHttpResponseMixin, AsyncFcgiHandler):
+	async def handle(self):
 		try:
 			doc_root = self.environ["DOCUMENT_ROOT"]
 			req_method = self.environ["REQUEST_METHOD"]
 			if req_method not in ("GET", "HEAD"):
-				return self.send_response(405)
+				return await self.send_response(405)
 
 			url = unquote(self.environ["QUERY_STRING"])
 			logger.debug(url)
 			if not image_url_pattern.fullmatch(url):
-				return self.send_response(403)
+				return await self.send_response(403)
 
-			cache_file = self.server.get(url)
+			cache_file = await self.server.get(url)
 			logger.debug(cache_file)
 			if not cache_file:
-				return self.send_response(404)
+				return await self.send_response(404)
 
 			rel_path = self.get_relative_path(cache_file, doc_root)
 			logger.debug(rel_path)
 			if not rel_path:
-				return self.send_response(404)
+				return await self.send_response(404)
 
-			return self.send_redirect('/' + rel_path)
+			return await self.send_redirect('/' + rel_path)
 
 		except Exception:
 			logger.exception("error in handle request")
-			return self.send_response(500)
+			return await self.send_response(500)
 
 	@staticmethod
 	def get_relative_path(path, doc_root):
@@ -108,14 +155,7 @@ class image_cache_handler(HttpResponseMixin, FcgiHandler):
 
 # entrance
 
-if __name__ == "__main__":
-	logging.basicConfig(level = logging.DEBUG, format = constants.LOG_FORMAT, stream = sys.stderr)
-
-	parser = argparse.ArgumentParser()
-	parser.add_argument("--path", required = True)
-	parser.add_argument("--max-size")
-
-	args = parser.parse_args()
+async def main(args):
 	max_size = None
 	if args.max_size:
 		max_size = constants.number_with_unit(args.max_size)
@@ -124,5 +164,16 @@ if __name__ == "__main__":
 	image_root = os.path.realpath(args.path)
 	os.makedirs(image_root, exist_ok = True)
 
-	with ImageCacheServer(image_cache_handler, args.path, max_size) as server:
-		server.serve_forever(poll_interval = 600)
+	async with ImageCacheServer(image_cache_handler, args.path, max_size) as server:
+		await server.serve_forever()
+
+
+if __name__ == "__main__":
+	logging.basicConfig(level = logging.DEBUG, format = constants.LOG_FORMAT, stream = sys.stderr)
+
+	parser = argparse.ArgumentParser()
+	parser.add_argument("--path", required = True)
+	parser.add_argument("--max-size")
+
+	args = parser.parse_args()
+	asyncio.run(main(args))
