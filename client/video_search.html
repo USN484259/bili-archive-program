@@ -1,0 +1,263 @@
+<!-- This file contains code written by Copilot, GPT 4.1 -->
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+</head>
+<body>
+	<h1 id="title">Video Search</h1>
+
+	<div id="condition-list"></div>
+	<button id="add-condition">Add Condition</button>
+	<div class="sort-condition">
+		<select id="sort_keys">
+		</select>
+		<select id="sort_order">
+			<option value="">ascending</option>
+			<option value="-" selected>descending</option>
+		</select>
+	</div>
+	<button id="search" disabled>search</button>
+
+	<label for="results" id="status"></label>
+	<table id="results">
+		<thead>
+			<tr>
+				<th>cover</th>
+				<th>title</th>
+				<th>author</th>
+				<th>duration</th>
+				<th>likes/views</th>
+				<th>mtime</th>
+			</tr>
+		</thead>
+		<tbody>
+		</tbody>
+	</table>
+	<div id="pages-bar"></div>
+<style>
+#condition-list {
+	margin-bottom: 10px;
+}
+.condition-row, .sort-condition {
+	display: flex;
+	align-items: center;
+	margin-bottom: 4px;
+}
+.condition-row select, .condition-row input {
+	margin-right: 8px;
+	padding: 2px 4px;
+}
+.condition-row button {
+	padding: 2px 8px;
+}
+#pages-bar {
+	margin-top: 10px;
+	text-align: center;
+}
+#pages-bar button {
+	margin: 0 2px;
+	padding: 2px 8px;
+}
+table {
+	width: 100%;
+	border-collapse: collapse;
+}
+thead {
+	border: 1px solid;
+}
+th, td {
+	padding: 10px;
+}
+tbody tr:nth-child(odd) {
+	background-color: #cccccc;
+}
+tbody tr:nth-child(even) {
+	background-color: #eeeeee;
+}
+</style>
+
+	<script type="module">
+
+import * as config from "/config.js";
+const util_module = import(config.util_module);
+const params = new URLSearchParams(window.location.search);
+const db_path = decodeURIComponent(params.get("db"));
+const video_root = decodeURIComponent(params.get("path"));
+
+const page_size = 40;
+let conditions = [];
+let page = 0;
+
+const sort_keys = [
+	"mtime", "title", "tags", "parts", "duration", "ctime", "pubtime", "views", "uname", "uid"
+];
+
+const query_keys = [
+	"bvid", "title", "tags", "uname", "uid", "desc", "mtime", "parts", "duration", "ctime", "pubtime", "views", "likes", "size"
+];
+
+function initSortKeys(key = "mtime") {
+	const sort_elem = document.getElementById("sort_keys");
+	for (const k of sort_keys) {
+		const opt = document.createElement("option");
+		opt.value = k;
+		opt.textContent = k;
+		if (k === key) opt.selected = true;
+		sort_elem.appendChild(opt);
+	}
+}
+
+function createConditionRow(key = "title", value = "") {
+	const row = document.createElement("div");
+	row.className = "condition-row";
+	const keySel = document.createElement("select");
+	for (const k of query_keys) {
+		const opt = document.createElement("option");
+		opt.value = k;
+		opt.textContent = k;
+		if (k === key) opt.selected = true;
+		keySel.appendChild(opt);
+	}
+	const valInput = document.createElement("input");
+	valInput.type = "text";
+	valInput.value = value;
+	const delBtn = document.createElement("button");
+	delBtn.textContent = "Remove";
+	delBtn.type = "button";
+	delBtn.onclick = () => {
+		row.remove();
+	};
+	row.appendChild(keySel);
+	row.appendChild(valInput);
+	row.appendChild(delBtn);
+	return row;
+}
+
+function collectConditions() {
+	const list = document.getElementById("condition-list");
+	const rows = list.querySelectorAll(".condition-row");
+	const sort = document.getElementById("sort_keys");
+	const order = document.getElementById("sort_order");
+	const conds = [];
+	for (const row of rows) {
+		const key = row.querySelector("select").value;
+		const value = row.querySelector("input").value.trim();
+		if (key && value) conds.push([key, value]);
+	}
+	conds.push(["order", order.value + sort.value]);
+	return conds;
+}
+
+async function query() {
+	const conds = conditions;
+	const searchParams = new URLSearchParams();
+	for (const [key, value] of conds) {
+		searchParams.append(key, value);
+	}
+	searchParams.append("limit", page_size);
+	searchParams.append("offset", page * page_size);
+	let url = new URL(db_path, document.location);
+	url.search = searchParams;
+	let resp = await fetch(url);
+	if (!resp.ok) {
+		throw new Error("" + resp.statusText + ": " + url);
+	}
+	return await resp.json();
+}
+
+function renderResultsTable(data) {
+	const tbody = document.querySelector("#results tbody");
+	tbody.innerHTML = "";
+	for (const row of data) {
+		const tr = document.createElement("tr");
+		const coverTd = document.createElement("td");
+		if (row.cover) {
+			const img = document.createElement("img");
+			img.src = video_root + '/' + row.bvid + '/' + row.cover;
+			img.style.maxWidth = "80px";
+			img.style.maxHeight = "60px";
+			img.setAttribute("loading", "lazy");
+			coverTd.appendChild(img);
+		}
+		tr.appendChild(coverTd);
+		const titleTd = document.createElement("td");
+		const hrefTd = document.createElement("a");
+		hrefTd.href = util.make_video_url(video_root + '/' + row.bvid)
+		hrefTd.textContent = row.title;
+		titleTd.appendChild(hrefTd);
+		tr.appendChild(titleTd);
+		const authorTd = document.createElement("td");
+		authorTd.textContent = row.uname;
+		tr.appendChild(authorTd);
+		const durationTd = document.createElement("td");
+		durationTd.textContent = util.duration_string(row.duration);
+		tr.appendChild(durationTd);
+		const lvTd = document.createElement("td");
+		lvTd.textContent = "" + util.stat_string(row.likes) + "/" + util.stat_string(row.views);
+		tr.appendChild(lvTd);
+		const mtimeTd = document.createElement("td");
+		mtimeTd.textContent = util.localtime_string(row.mtime * 1000);
+		tr.appendChild(mtimeTd);
+		tbody.appendChild(tr);
+	}
+}
+
+function renderPagesBar(count) {
+	const bar = document.getElementById("pages-bar");
+	bar.innerHTML = "";
+	const totalPages = Math.ceil(count / page_size);
+	const maxShow = 9;
+	let start = Math.max(0, page - Math.floor(maxShow / 2));
+	let end = Math.min(totalPages, start + maxShow);
+	if (end - start < maxShow) start = Math.max(0, end - maxShow);
+	for (let i = start; i < end; ++i) {
+		const btn = document.createElement("button");
+		btn.textContent = (i + 1).toString();
+		if (i === page) btn.style.fontWeight = "bold";
+		btn.onclick = () => {
+			if (i !== page) {
+				page = i;
+				update();
+			}
+		};
+		bar.appendChild(btn);
+	}
+}
+
+async function update() {
+	const searchBtn = document.getElementById("search");
+	searchBtn.disabled = true;
+	try {
+		let status = document.getElementById("status");
+		status.replaceChildren("searching");
+		let results = await query();
+		status.replaceChildren("" + results.count + " results, page " + (page + 1));
+		renderResultsTable(results.data);
+		renderPagesBar(results.count);
+	} finally {
+		searchBtn.disabled = false;
+	}
+}
+
+document.addEventListener("DOMContentLoaded", () => util_module.then((util) => {
+	globalThis.util = util;
+	const list = document.getElementById("condition-list");
+	const addBtn = document.getElementById("add-condition");
+	const searchBtn = document.getElementById("search");
+	addBtn.onclick = () => {
+		list.appendChild(createConditionRow());
+	};
+	searchBtn.onclick = () => {
+		conditions = collectConditions();
+		page = 0;
+		update();
+	};
+	initSortKeys();
+	conditions = collectConditions();
+	update();
+}));
+
+</script>
+</body>
+</html>

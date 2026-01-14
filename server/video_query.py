@@ -3,9 +3,11 @@
 import os
 import sys
 sys.path[0] = os.getcwd()
+
+import time
 import logging
-import argparse
-from urllib.parse import parse_qs
+from urllib.parse import urlparse, parse_qs
+from collections import OrderedDict
 
 
 from video_database import VideoDatabase
@@ -15,6 +17,7 @@ from simple_fastcgi import FcgiServer, HttpResponseMixin, FcgiHandler
 
 import constants
 QUERY_PAGE_LIMIT = 100
+DB_CLOSE_TIMEOUT = 120
 
 # static objects
 
@@ -30,19 +33,28 @@ class QueryHandler(HttpResponseMixin, FcgiHandler):
 			if req_method not in ("GET", "HEAD"):
 				return self.send_response(405)
 
+			url = urlparse(self.environ.get("REQUEST_URI"))
+			db_path = url.path.lstrip('/.')
+			www_root = self.environ.get("DOCUMENT_ROOT")
+			db = self.server.get(os.path.join(www_root, db_path))
+			if not db:
+				return self.send_response(404)
+
 			query_str = self.environ.get("QUERY_STRING")
 			try:
 				query = parse_qs(query_str, strict_parsing = True)
-				rules = { k : v[0] for k, v in query.items() }
+				rules = dict(query.items())
 
-				limit = int(rules.get("limit", 0))
-				limit = (limit > 0) and min(limit, self.server.page_limit) or self.server.page_limit
-				rules["limit"] = limit
+				limit = int(rules.get("limit", (0, ))[0])
+				limit = (limit > 0) and min(limit, QUERY_PAGE_LIMIT) or QUERY_PAGE_LIMIT
+				rules["limit"] = (limit, )
 			except (TypeError, ValueError, KeyError, IndexError):
 				return self.send_response(400)
-
-			result = self.server.query(rules)
-			return self.send_response(200, "application/json", result)
+			try:
+				result, count = db.query(rules)
+				return self.send_response(200, "application/json", {"count": count, "data": result})
+			except Exception:
+				return self.send_response(400)
 
 		except Exception:
 			logger.exception("error in handle request")
@@ -50,24 +62,48 @@ class QueryHandler(HttpResponseMixin, FcgiHandler):
 
 
 class VideoServer(FcgiServer):
-	def __init__(self, handler, db_path, page_limit = None):
+	def __init__(self, handler):
 		FcgiServer.__init__(self, handler)
-		self.database = VideoDatabase(db_path)
-		self.page_limit = (page_limit and page_limit > 0) and page_limit or QUERY_PAGE_LIMIT
+		self.db_map = OrderedDict()
 
-	def query(self, rules):
-		return self.database.query(rules)
+	def get(self, db_path):
+		rec = self.db_map.get(db_path)
+		if rec:
+			rec["atime"] = int(time.time())
+			self.db_map.move_to_end(db_path, last = True)
+			return rec["database"]
 
+		try:
+			logger.info("opening database %s", db_path)
+			db = VideoDatabase(db_path)
+			rec = {
+				"database": db,
+				"atime": int(time.time())
+			}
+			self.db_map[db_path] = rec
+			self.db_map.move_to_end(db_path, last = True)
+			return db
+		except Exception as e:
+			logger.exception("")
+			return None
+
+	def service_actions(self):
+		super().service_actions()
+		cur_time = int(time.time())
+		while self.db_map:
+			rec = next(iter(self.db_map.values()))
+			if rec["atime"] + DB_CLOSE_TIMEOUT >= cur_time:
+				return
+			db_path, r = self.db_map.popitem(last = False)
+			assert(r is rec)
+			db = rec["database"]
+			logger.info("closing database %s", db_path)
+			db.close()
 
 # entrance
 
 if __name__ == "__main__":
-	logging.basicConfig(level = logging.INFO, format = constants.LOG_FORMAT, stream = sys.stderr)
+	logging.basicConfig(level = logging.DEBUG, format = constants.LOG_FORMAT, stream = sys.stderr)
 
-	parser = argparse.ArgumentParser()
-	parser.add_argument("--limit", type = int)
-	parser.add_argument("database")
-
-	args = parser.parse_args()
-	with VideoServer(QueryHandler, args.database, args.limit) as server:
+	with VideoServer(QueryHandler) as server:
 		server.serve_forever(poll_interval = 10)

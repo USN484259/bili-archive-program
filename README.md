@@ -56,6 +56,7 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 + live_page.html	直播状态页面，显示monitor.py监控的直播间状态
 + live_danmaku.html	显示直播间实时弹幕，使用live_rec.py转发的弹幕信息
 + user_page.html	显示用户信息和动态
++ video_search.html	检索视频信息数据库
 
 ## 依赖表
 
@@ -88,6 +89,7 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 |	live_status.py	|	UNIX	|	3.8+		|	M		|	M		|			|
 |	bili_proxy.py	|	any	|	3.8+		|	M		|	M		|			|
 |	image_cache.py	|	UNIX	|	3.8+		|	M		|	M		|			|
+|	video_query.py	|	any	|	3.8+		|	M		|			|			|
 
 ### http前端
 
@@ -100,6 +102,7 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 |	live_page.html		|	any	|	M		|			|			|
 |	live_danmaku.html	|	any	|	M		|			|			|
 |	user_page.html		|	any	|	M		|			|			|
+|	video_search.html	|	any	|	M		|			|			|
 
 ### 桌面应用
 
@@ -165,7 +168,7 @@ ln -s ../../tmp/image
 # 初始化fcgi目录
 cd /srv/http/fcgi
 # 通过pip3安装simple-fastcgi
-pip3 install --target /srv/http/fcgi --no-compile --no-deps simple-fastcgi
+pip3 install --target /srv/http/fcgi --no-compile --no-deps simple-fastcgi simple-inotify
 # httpx, watchdog, websockets 也可通过pip3安装
 # pip3 install --target /srv/http/fcgi --no-compile httpx watchdog websockets brotli
 for f in constants.py core.py runtime.py network.py verify.py video.py

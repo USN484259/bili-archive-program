@@ -18,6 +18,8 @@ import constants
 
 # constants
 
+cmp_pattern = re.compile(r"\s*([<=>]=?|<>|!=)\s*(\d+)\s*")
+
 ## sql helper functions
 def make_sql_column_def(desc, extra = None):
 	result = ", ".join(f"{k} {v}" for k, v in desc.items())
@@ -27,6 +29,12 @@ def make_sql_column_def(desc, extra = None):
 
 def make_sql_placeholder(desc):
 	return ", ".join(f":{k}" for k in desc.keys())
+
+
+def parse_cmp(value):
+	res = cmp_pattern.fullmatch(value)
+	if res:
+		return res.group(1), res.group(2)
 
 
 ## table definition
@@ -103,11 +111,20 @@ db_tables = {
 }
 
 query_keys = {
-	"bvid": "==",
-	"title": "LIKE",
-	"tags": "LIKE",
-	"uname": "LIKE",
-	"desc": "LIKE",
+	"bvid": ("==", " OR "),
+	"title": ("LIKE", " OR "),
+	"tags": ("LIKE", " OR "),
+	"uname": ("LIKE", " OR "),
+	"uid": ("==", " OR "),
+	"desc": ("LIKE", " OR "),
+	"mtime": (parse_cmp, " AND "),
+	"parts": (parse_cmp, " AND "),
+	"duration": (parse_cmp, " AND "),
+	"ctime": (parse_cmp, " AND "),
+	"pubtime": (parse_cmp, " AND "),
+	"views": (parse_cmp, " AND "),
+	"likes": (parse_cmp, " AND "),
+	"size": (parse_cmp, " AND "),
 }
 
 order_keys = ("mtime", "title", "tags", "parts", "duration", "ctime", "pubtime", "views", "uname", "uid")
@@ -184,11 +201,10 @@ class VideoDatabase:
 		order_dir = "DESC"
 		offset = 0
 		limit = None
-		count = False
 
 		for k, v in rules.items():
 			if k == "order":
-				order_match = order_pattern.fullmatch(v)
+				order_match = order_pattern.fullmatch(v[0])
 				if order_match:
 					dir = order_match.group(1)
 					key = order_match.group(2)
@@ -200,42 +216,36 @@ class VideoDatabase:
 							order_dir = "ASC"
 						continue
 			elif k == "offset":
-				offset = int(v)
+				offset = int(v[0])
 				continue
 			elif k == "limit":
-				limit = int(v)
-				continue
-			elif k == "count":
-				count = bool(int(v))
+				limit = int(v[0])
 				continue
 
-			verb = query_keys.get(k)
-			if not verb:
+			query_obj = query_keys.get(k)
+			if not query_obj:
 				raise KeyError("invalid key %s" % k)
-			cond_list.append("%s %s ?" % (k, verb))
-			if verb == "LIKE":
-				v = "%%%s%%" % v
-			arg_list.append(v)
 
-		if count:
-			sql = "SELECT COUNT(*) as count FROM ( SELECT * FROM "
-		else:
-			sql = "SELECT * FROM "
+			sub_cond = []
+			for value in v:
+				if callable(query_obj[0]):
+					verb, value = query_obj[0](value)
+				else:
+					verb = query_obj[0]
 
-		sql += view_table_name
+				sub_cond.append("%s %s ?" % (k, verb))
 
+				if verb == "LIKE":
+					value = "%%%s%%" % value
+				arg_list.append(value)
+
+			cond_list.append("( %s )" % query_obj[1].join(sub_cond))
+
+		sql = "SELECT * FROM " + view_table_name
 		if cond_list:
 			sql += " WHERE " + " AND ".join(cond_list)
 
-		sql += " GROUP BY bvid "
-
-		if count:
-			sql += ")"
-		else:
-			sql += " ORDER BY %s %s" % (order_key, order_dir)
-
-			if limit or offset:
-				sql += " LIMIT %d OFFSET %d" % (limit or -1, offset)
+		sql += " GROUP BY bvid"
 
 		logger.debug(sql)
 		logger.debug(arg_list)
@@ -243,10 +253,22 @@ class VideoDatabase:
 		cursor = self.database.cursor()
 		try:
 			cursor.arraysize = 0x40
+			cursor.execute("BEGIN")
+			cursor.execute("SELECT COUNT(*) as count FROM ( %s )" % sql, arg_list)
+			count = cursor.fetchone()["count"]
+
+			sql += " ORDER BY %s %s" % (order_key, order_dir)
+			if limit or offset:
+				sql += " LIMIT %d OFFSET %d" % (limit or -1, offset)
+
+			logger.debug(sql)
 			cursor.execute(sql, arg_list)
-			return cursor.fetchall()
+			data = cursor.fetchall()
+			cursor.execute("END")
+			return data, count
 		finally:
 			cursor.close()
+
 
 	def load_info_db(self, cursor, bvid):
 		cursor.execute("SELECT * FROM %s WHERE bvid = ?" % video_table_name, (bvid, ))
