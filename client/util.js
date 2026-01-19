@@ -125,3 +125,12 @@ export function create_schedule_button(bvid) {
 	form_elem.addEventListener("submit", on_schedule_video)
 	return form_elem;
 }
+
+const cover_image_pattern = new RegExp("^(.+/)[^/.]+([.][^/.]+)$");
+
+export function handle_legacy_cover_image(ev) {
+	let img_elem = ev.target;
+	img_elem.onerror = null;
+	let cover_url = img_elem.src.replace(cover_image_pattern, "$1cover$2");
+	img_elem.src = cover_url;
+}

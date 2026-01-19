@@ -437,7 +437,7 @@ class VideoDatabaseManager(VideoDatabase):
 		if not constants.bvid_pattern.fullmatch(bvid):
 			raise ValueError("invalid video %s", bvid)
 
-		logger.info("update video %s", bvid)
+		logger.debug("update video %s", bvid)
 		json_info = self.load_info_json(bvid)
 
 		cursor = self.database.cursor()
@@ -456,7 +456,7 @@ class VideoDatabaseManager(VideoDatabase):
 			db_bv_info = db_info["bv_info"]
 			json_bv_info = json_info["bv_info"]
 			if json_bv_info["mtime"] <= db_bv_info["mtime"]:
-				logger.info("skip video %s", bvid)
+				logger.debug("skip video %s", bvid)
 				# close the transaction
 				cursor.execute("ROLLBACK")
 				return False
@@ -555,7 +555,7 @@ class VideoDatabaseManager(VideoDatabase):
 			except OSError:
 				pass
 
-		logger.info("removing video %s", bvid)
+		logger.debug("removing video %s", bvid)
 		cursor = self.database.cursor()
 		try:
 			cursor.execute("BEGIN IMMEDIATE")
@@ -577,7 +577,7 @@ class VideoDatabaseManager(VideoDatabase):
 
 	def walk(self, *, callback = None):
 		start_time = int(time.time())
-		logger.debug("start walking %s %d", self.video_root, start_time)
+		logger.info("start walking %s %d", self.video_root, start_time)
 		with os.scandir(self.video_root) as it:
 			for entry in it:
 				updated = False
@@ -595,7 +595,7 @@ class VideoDatabaseManager(VideoDatabase):
 				if updated and callable(callback):
 					callback(entry.name)
 
-		logger.debug("walking %s took %d seconds", self.video_root, int(time.time()) - start_time)
+		logger.info("walking %s took %d seconds", self.video_root, int(time.time()) - start_time)
 
 
 	def autoremove(self):

@@ -127,6 +127,7 @@ function show_suggestions(resp) {
 		img_elem.setAttribute("loading", "lazy");
 		img_elem.setAttribute("width", 160);
 		img_elem.setAttribute("height", 120);
+		img_elem.onerror = util.handle_legacy_cover_image;
 		pic_elem.appendChild(img_elem);
 		img_td.appendChild(pic_elem);
 		tr_elem.appendChild(img_td);
@@ -134,6 +135,15 @@ function show_suggestions(resp) {
 		let title_elem = document.createElement("td");
 		title_elem.append(info.title);
 		tr_elem.appendChild(title_elem);
+
+		fetch(config.video_cache_root + info.bvid + "/info.json", {"method": "HEAD"}).then((resp) => {
+			if (!resp.ok)
+				return;
+			let href_elem = document.createElement("a");
+			href_elem.href = util.make_video_url(config.video_cache_root + info.bvid);
+			href_elem.append(info.title);
+			title_elem.replaceChildren(href_elem);
+		});
 
 		let author_elem = document.createElement("td");
 		author_elem.append(info.owner.name);

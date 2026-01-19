@@ -81,15 +81,15 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 
 ### http后端
 
-|	项目		|	OS	|	Python		|	simple-fastcgi	|	httpx		|	watchdog	|
-|	----		|	----	|	----		|	----		|	----		|	----		|
-|	dir_listing.py	|	any	|	3.8+		|	M		|			|			|
-|	zip_access.py	|	any	|	3.8+		|	M		|			|			|
-|	video_cache.py	|	UNIX	|	3.8+		|	M		|	M		|	O		|
-|	live_status.py	|	UNIX	|	3.8+		|	M		|	M		|			|
-|	bili_proxy.py	|	any	|	3.8+		|	M		|	M		|			|
-|	image_cache.py	|	UNIX	|	3.8+		|	M		|	M		|			|
-|	video_query.py	|	any	|	3.8+		|	M		|			|			|
+|	项目		|	OS	|	Python		|	simple-fastcgi	|	httpx		|
+|	----		|	----	|	----		|	----		|	----		|
+|	dir_listing.py	|	any	|	3.8+		|	M		|			|
+|	zip_access.py	|	any	|	3.8+		|	M		|			|
+|	video_cache.py	|	UNIX	|	3.8+		|	M		|	M		|
+|	live_status.py	|	UNIX	|	3.8+		|	M		|	M		|
+|	bili_proxy.py	|	any	|	3.8+		|	M		|	M		|
+|	image_cache.py	|	UNIX	|	3.8+		|	M		|	M		|
+|	video_query.py	|	any	|	3.8+		|	M		|			|
 
 ### http前端
 
@@ -137,7 +137,7 @@ SHELL=/bin/bash
 
 ```sh
 # 安装软件包
-sudo apt install lighttpd python3-pip python3-httpx python3-watchdog python3-websockets python3-brotli
+sudo apt install lighttpd python3-pip python3-httpx python3-websockets python3-brotli
 
 # 修改lighttpd服务
 sudo mkdir -p /etc/systemd/system/lighttpd.service.d/
@@ -169,8 +169,8 @@ ln -s ../../tmp/image
 cd /srv/http/fcgi
 # 通过pip3安装simple-fastcgi
 pip3 install --target /srv/http/fcgi --no-compile --no-deps simple-fastcgi simple-inotify
-# httpx, watchdog, websockets 也可通过pip3安装
-# pip3 install --target /srv/http/fcgi --no-compile httpx watchdog websockets brotli
+# httpx, websockets, brotil 也可通过pip3安装
+# pip3 install --target /srv/http/fcgi --no-compile httpx websockets brotli
 for f in constants.py core.py runtime.py network.py verify.py video.py
 do
 	ln -s ../code/$f
@@ -235,7 +235,6 @@ python desktop/danmaku_reaction.py -u $HOME/bili-credential.txt config/danmaku.t
 + [FFmpeg](https://ffmpeg.org/) A complete, cross-platform solution to record, convert and stream audio and video.
 + [simple-fastcgi](https://pypi.org/project/simple-fastcgi/) simple FastCGI protocol parser and sync/async handler in pure python
 + [simple_inotify](https://pypi.org/project/simple-inotify/) Very thin inotify(7) wrapper for Linux.
-+ [watchdog](https://pypi.org/project/watchdog/) Python API and shell utilities to monitor file system events.
 + [psutil](https://pypi.org/project/psutil/) is a cross-platform library for retrieving information on running processes and system utilizationin Python.
 + [websockets](https://pypi.org/project/websockets/) An implementation of the WebSocket Protocol
 + [flv.js](https://github.com/Bilibili/flv.js) An HTML5 Flash Video (FLV) Player written in pure JavaScript without Flash.

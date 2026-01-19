@@ -5,6 +5,7 @@ import sys
 sys.path[0] = os.getcwd()
 
 import time
+import signal
 import asyncio
 import logging
 import argparse
@@ -47,12 +48,13 @@ def exec_download(video_root, bvid, pipe, arg_list, extra_args):
 # classes
 
 class BVDownloader:
-	def __init__(self, video_root, /, args = (), *, max_queue = 0x10, max_records = 0x400):
+	def __init__(self, video_root, /, db_func = None, args = (), *, max_queue = 0x10, max_history = 0x10):
 		self.video_root = video_root
 		self.args = args
-		self.record = deque([], max_records)
+		self.history = deque([], max_history)
 		self.queue = deque([], max_queue)
 		self.pipe = multiprocessing.Pipe(False)
+		self.db_func = db_func
 		self.task = None
 		self.msg = None
 
@@ -63,6 +65,8 @@ class BVDownloader:
 		return task
 
 	def update(self):
+		done_bvid = None
+
 		if not self.queue:
 			return
 
@@ -87,7 +91,8 @@ class BVDownloader:
 				else:
 					rec["status"] = "failed %s" % (self.msg or "(unknown error)")
 			rec["stop_time"] = int(time.time() * 1000)
-			self.record.append(rec)
+			done_bvid = rec["bvid"]
+			self.history.append(rec)
 
 		while self.task is None and self.queue:
 			rec = self.queue[0]
@@ -99,6 +104,9 @@ class BVDownloader:
 			self.task = self.download(rec["bvid"], rec.get("args", {}))
 			rec["start_time"] = int(time.time() * 1000)
 			rec["status"] = "running"
+
+		if done_bvid and callable(self.db_func):
+			self.db_func(done_bvid)
 
 
 	def schedule(self, bvid, args = {}):
@@ -149,7 +157,7 @@ class BVDownloader:
 			"timestamp": int(time.time() * 1000),
 			"since": since,
 			"queue": make_diff_list(self.queue, since),
-			"record": make_diff_list(self.record, since),
+			"history": make_diff_list(self.history, since),
 		}
 
 		if self.queue and self.queue[0].get("status", "") == "running":
@@ -218,26 +226,30 @@ class bv_play_handler(HttpResponseMixin, FcgiHandler):
 
 
 class BVPlayServer(FcgiServer):
-	def __init__(self, handler, cache_root, cache_size, max_duration, args):
+	def __init__(self, handler, cache_root, db_path, max_duration, args):
 		FcgiServer.__init__(self, handler)
-		if cache_size:
-			from cache_folder import cache_folder
-			self.bv_cache = cache_folder(cache_root, cache_size, self.cache_del_func)
 		self.max_duration = max_duration
-		self.bv_downloader = BVDownloader(cache_root, args)
+		if db_path:
+			from video_database import VideoDatabaseManager
+			self.database = VideoDatabaseManager(cache_root, db_path)
+			self.need_walk = True
+			signal.signal(signal.SIGUSR1, self.sig_walk)
 
-	@staticmethod
-	def cache_del_func(root, path, stat):
-		name = os.path.join(root, path)
-		logger.debug("removing %s", name)
-		result = False
+		self.bv_downloader = BVDownloader(cache_root, self.handle_db_update, args)
+
+	def sig_walk(self, signum, frame):
+		logger.info("walk scheduled")
+		self.need_walk = True
+
+	def handle_db_update(self, bvid):
+		if not self.database:
+			return
 		try:
-			os.remove(name)
-			result = True
-			os.removedirs(os.path.split(name)[0])
+			logger.info("updating db %s", bvid)
+			if self.database.update_video(bvid):
+				self.database.update_video_size(bvid)
 		except Exception:
-			pass
-		return result
+			logger.exception("failed in updating database for %s", bvid)
 
 	def schedule(self, bvid, args):
 		result = self.bv_downloader.schedule(bvid, args)
@@ -259,6 +271,12 @@ class BVPlayServer(FcgiServer):
 	def service_actions(self):
 		super().service_actions()
 		self.bv_downloader.update()
+		if self.need_walk:
+			logger.info("walking video cache")
+			try:
+				self.database.walk()
+			finally:
+				self.need_walk = False
 
 # entrance
 
@@ -267,18 +285,20 @@ if __name__ == "__main__":
 
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--path", required = True)
-	parser.add_argument("--max-size")
+	parser.add_argument("--database")
 	parser.add_argument("--max-duration", type = int)
 	parser.add_argument("args", nargs = '*')
 
 	args = parser.parse_args()
-	max_size = None
-	if args.max_size:
-		max_size = constants.number_with_unit(args.max_size)
 
-	logger.info("cache at %s, max_size %s, max_duration %s", args.path, str(max_size), str(args.max_duration))
+	logger.info("cache at %s, database %s, max_duration %s", args.path, str(args.database), str(args.max_duration))
 	cache_path = os.path.realpath(args.path)
 	os.makedirs(cache_path, exist_ok = True)
+	if args.database:
+		db_path = os.path.split(args.database)[0]
+		if db_path:
+			db_path = os.path.realpath(db_path)
+			os.makedirs(db_path, exist_ok = True)
 
-	with BVPlayServer(bv_play_handler, args.path, max_size, args.max_duration, args.args) as server:
+	with BVPlayServer(bv_play_handler, args.path, args.database, args.max_duration, args.args) as server:
 		server.serve_forever(poll_interval = 10)

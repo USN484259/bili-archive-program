@@ -5,11 +5,12 @@
 	<meta charset="utf-8">
 </head>
 <body>
-	<h1 id="title">Video Search</h1>
+	<h1 id="title">Video Search for <a id="video_link"></a></h1>
 
 	<div id="condition-list"></div>
 	<button id="add-condition">Add Condition</button>
-	<div class="sort-condition">
+	<div id="sort-condition">
+		<span>Sorted by </label>
 		<select id="sort_keys">
 		</select>
 		<select id="sort_order">
@@ -34,12 +35,27 @@
 		<tbody>
 		</tbody>
 	</table>
-	<div id="pages-bar"></div>
+	<div id="pages-bar">
+		<span id="pages-btn"></span>
+		<span>
+			<input id="goto-input", type="number", min="1"/>
+			<button id="goto-button">goto</button>
+		</span>
+	</div>
 <style>
 #condition-list {
 	margin-bottom: 10px;
 }
-.condition-row, .sort-condition {
+#sort-condition {
+	display: flex;
+	align-items: center;
+	margin: 4px;
+}
+#search {
+	font-weight: bold;
+	padding: 10px;
+}
+.condition-row {
 	display: flex;
 	align-items: center;
 	margin-bottom: 4px;
@@ -175,9 +191,10 @@ function renderResultsTable(data) {
 		if (row.cover) {
 			const img = document.createElement("img");
 			img.src = video_root + '/' + row.bvid + '/' + row.cover;
-			img.style.maxWidth = "80px";
-			img.style.maxHeight = "60px";
+			img.style.maxWidth = "120px";
+			img.style.maxHeight = "80px";
 			img.setAttribute("loading", "lazy");
+			img.onerror = util.handle_legacy_cover_image;
 			coverTd.appendChild(img);
 		}
 		tr.appendChild(coverTd);
@@ -203,26 +220,41 @@ function renderResultsTable(data) {
 	}
 }
 
+function create_page_button(bar, text, func, active = false) {
+	const btn = document.createElement("button");
+	btn.textContent = text;
+	if (active) btn.style.fontWeight = "bold";
+	btn.onclick = func;
+	bar.appendChild(btn);
+}
+
+function create_page_spacing(bar, text) {
+	const elem = document.createElement("span");
+	elem.textContent = text;
+	bar.appendChild(elem);
+}
+
 function renderPagesBar(count) {
-	const bar = document.getElementById("pages-bar");
+	const bar = document.getElementById("pages-btn");
 	bar.innerHTML = "";
-	const totalPages = Math.ceil(count / page_size);
+	const totalPages = Math.max(1, Math.ceil(count / page_size));
 	const maxShow = 9;
 	let start = Math.max(0, page - Math.floor(maxShow / 2));
 	let end = Math.min(totalPages, start + maxShow);
 	if (end - start < maxShow) start = Math.max(0, end - maxShow);
+	create_page_button(bar, "<<", () => { page = Math.max(0, page - 1); update(); });
+	create_page_spacing(bar, "...");
+
 	for (let i = start; i < end; ++i) {
-		const btn = document.createElement("button");
-		btn.textContent = (i + 1).toString();
-		if (i === page) btn.style.fontWeight = "bold";
-		btn.onclick = () => {
-			if (i !== page) {
-				page = i;
-				update();
-			}
-		};
-		bar.appendChild(btn);
+		create_page_button(bar, (i + 1).toString(), () => { page = i; update(); }, (i == page));
 	}
+
+	create_page_spacing(bar, "...");
+	create_page_button(bar, ">>", () => { page = Math.min(page + 1, totalPages - 1); update(); });
+
+	const goto_input = document.getElementById("goto-input");
+	goto_input.placeholder = totalPages.toString();
+	goto_input.max = totalPages.toString();
 }
 
 async function update() {
@@ -242,9 +274,15 @@ async function update() {
 
 document.addEventListener("DOMContentLoaded", () => util_module.then((util) => {
 	globalThis.util = util;
+
+	const video_link = document.getElementById("video_link");
+	video_link.href = video_root + "index.html";
+	video_link.append(video_root);
+
 	const list = document.getElementById("condition-list");
 	const addBtn = document.getElementById("add-condition");
 	const searchBtn = document.getElementById("search");
+	const gotoBtn = document.getElementById("goto-button");
 	addBtn.onclick = () => {
 		list.appendChild(createConditionRow());
 	};
@@ -252,6 +290,15 @@ document.addEventListener("DOMContentLoaded", () => util_module.then((util) => {
 		conditions = collectConditions();
 		page = 0;
 		update();
+	};
+	gotoBtn.onclick = () => {
+		const goto_input = document.getElementById("goto-input");
+		let value = Number(goto_input.value);
+		if (value > 0) {
+			goto_input.value = "";
+			page = value - 1;
+			update();
+		}
 	};
 	initSortKeys();
 	conditions = collectConditions();

@@ -3,6 +3,7 @@ export const flv_module = "/flv.min.js"
 export const hls_module = "/hls.min.js"
 
 export const video_cache_root = "/cache/video/"
+export const video_cache_database = "/cache/database/video.db"
 export const image_cache_root = "/cache/image/"
 
 export const player_url = "/player.html"

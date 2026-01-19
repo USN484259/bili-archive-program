@@ -4,7 +4,7 @@
 	<meta charset="utf-8">
 </head>
 <body>
-	<h1 id="title"><a id="cache_link">Cached Videos</a></h1>
+	<h1 id="title"><a id="cache_link">Video Cache</a></h1>
 
 	<form id="fetch_form" method="POST">
 		<span>
@@ -168,7 +168,7 @@ class TaskList {
 
 	update_list(stats) {
 		console.log(stats)
-		let task_list = stats.record.concat(stats.queue)
+		let task_list = stats.history.concat(stats.queue)
 
 		Promise.all(
 			task_list.map(
