@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+</head>
+<body>
+	<div class="tab_head">
+		<button onclick="switch_tab(0)">Video fetch</button>
+		<button onclick="switch_tab(1)">Fetched videos</button>
+		<button onclick="switch_tab(2)">Video search</button>
+		<button onclick="switch_tab(3)">Live status</button>
+	</div>
+
+	<div id="tab_content">
+		<iframe src="/video_fetch.html"></iframe>
+		<iframe src="/video_search.html?db=/cache/database/video.db&path=/cache/video"></iframe>
+		<iframe src="/video_search.html?db=/bili-arch/database/video.db&path=/bili-arch/video"></iframe>
+		<iframe src="/live_page.html"></iframe>
+	</div>
+	<style>
+
+iframe {
+	width: 100%;
+	height: 100vh;
+	object-fit: contain;
+}
+
+	</style>
+	<script>
+
+const tab_pattern = new RegExp("^#(\\d+)");
+
+
+function switch_tab(tab_index) {
+	let tab_content = document.getElementById("tab_content").children;
+	for (let i = 0; i < tab_content.length; i++) {
+		tab_content[i].hidden = (i != tab_index);
+	}
+}
+
+addEventListener("DOMContentLoaded", () => {
+	let match = location.hash.match(tab_pattern);
+	let tab_index = (match) ? parseInt(match[1]) : 0;
+
+	switch_tab(tab_index);
+});
+
+addEventListener("message", (ev) => {
+	if (ev.data && ev.data.type == "open-tab") {
+		console.log(ev.data.target);
+	}
+});
+
+	</script>
+</body>
+</html>

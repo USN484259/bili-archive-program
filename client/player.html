@@ -39,7 +39,7 @@ function play_flv(path) {
 		});
 		flvPlayer.attachMediaElement(videoElement);
 		flvPlayer.load();
-		flvPlayer.play();
+		// flvPlayer.play();
 	}
 
 }
@@ -54,6 +54,12 @@ function play_hls(path) {
 		hls.loadSource(path);
 		hls.attachMedia(videoElement);
 	}
+}
+
+function load_mp4(path) {
+	let videoelement = document.getElementById('video');
+	videoelement.setAttribute("src", path);
+	videoelement.load();
 }
 
 function play_video(path) {
@@ -76,6 +82,9 @@ function play_video(path) {
 			if (ext == "flv") {
 				load_js("/flv.min.js", play_flv, path + name);
 				return;
+			} else if (ext == "mp4") {
+				load_mp4(path + name);
+				return;
 			} else if (ext == "m4v") {
 				let cur_id = parseInt(name);
 				if (cur_id > best_video)
@@ -90,10 +99,7 @@ function play_video(path) {
 		let videoElement = document.getElementById('video');
 
 		if (best_video > 0) {
-			let videoElement = document.getElementById('video');
-			let video_url = path + best_video + ".m4v";
-			videoElement.setAttribute("src", video_url);
-			videoElement.load();
+			load_mp4(path + best_video + ".m4v");
 		}
 		if (best_audio > 0) {
 			let audioElement = document.createElement('audio');
@@ -126,6 +132,8 @@ addEventListener("DOMContentLoaded", () => {
 	if (path) {
 		if (path.endsWith(".flv"))
 			load_js(config.flv_module, play_flv, path);
+		else if (path.endsWith(".mp4"))
+			load_mp4(path);
 		else if (path.endsWith(".m3u8"))
 			load_js(config.hls_module, play_hls, path);
 		else

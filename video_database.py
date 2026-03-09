@@ -148,11 +148,15 @@ def empty_func(*args):
 # To achieve this, we need to call sqlite3_file_control() C API with SQLITE_FCNTL_PERSIST_WAL
 # https://sqlite.org/c3ref/c_fcntl_begin_atomic_write.html#sqlitefcntlpersistwal
 
-# However, sqlite3 module currently do not expose this interface
+# There is a pull request to add this interface to sqlite3 module, but not merged
 # https://github.com/python/cpython/pull/128507
+# Anyway, try to call this interface here
 
 def set_persist_wal(database):
-	logger.debug("FIXME: set_persist_wal not implemented")
+	try:
+		database.file_control(sqlite3.SQLITE_FCNTL_PERSIST_WAL, True)
+	except Exception:
+		logger.warning("cannot set persist_wal")
 	pass
 
 
@@ -171,9 +175,8 @@ class VideoDatabase:
 
 	def __init__(self, db_file):
 		self.database = None
-		assert(sqlite3.threadsafety == 3)
+		# assert(sqlite3.threadsafety == 3)
 		self.database = self.connect(db_file)
-		set_persist_wal(self.database)
 		self.database.row_factory = VideoDatabase.dict_factory
 
 
@@ -310,7 +313,8 @@ class VideoDatabaseManager(VideoDatabase):
 
 	def __init__(self, video_root, db_file = None, /, update_path = False):
 		super().__init__(db_file)
-		self.video_root = os.path.realpath(video_root, strict = True)
+		self.video_root = os.path.realpath(video_root)
+		set_persist_wal(self.database)
 
 		cursor = self.database.cursor()
 		try:

@@ -7,6 +7,7 @@ sys.path[0] = os.getcwd()
 import time
 import json
 import httpx
+import socket
 import signal
 import asyncio
 import logging
@@ -139,11 +140,18 @@ def fetch_status_bili(sess, uid_list):
 	raise RuntimeError(msg)
 
 
-def fetch_status_local(sess, url):
+def fetch_status_http(sess, url):
 	resp = sess.request("GET", url)
 	resp.raise_for_status()
 	return resp.json()
 	# logger.debug(live_status)
+
+
+def fetch_status_sock(sess, path):
+	with socket.socket(socket.AF_UNIX) as f:
+		f.connect(path)
+		data = f.recv(0x1000)
+		return json.loads(data.decode())
 
 
 def check_live_status(sess, rec, live_status):
@@ -170,8 +178,10 @@ def main(args):
 
 	if args.config:
 		uid_list = load_config(args.config)
-	elif not args.monitor_url:
-		raise RuntimeError("neither monitor-url nor config specified")
+	elif args.monitor_url or args.monitor_sock:
+		pass
+	else:
+		raise RuntimeError("at least monitor-url, monitor-sock or config should be specified")
 
 	Notify.init(args.name)
 	rec = {
@@ -199,12 +209,14 @@ def main(args):
 		try:
 			logger.info("checking live status")
 			live_status = None
-			if args.monitor_url:
-				try:
-					live_status = fetch_status_local(sess, args.monitor_url)
-				except Exception:
-					if not uid_list:
-						raise
+			try:
+				if args.monitor_url:
+					live_status = fetch_status_http(sess, args.monitor_url)
+				elif args.monitor_sock:
+					live_status = fetch_status_sock(sess, args.monitor_sock)
+			except Exception:
+				if not uid_list:
+					raise
 
 			if live_status is None and args.config:
 				live_status = fetch_status_bili(sess, uid_list)
@@ -234,7 +246,8 @@ if __name__ == "__main__":
 	parser.add_argument("--name", default = os.path.basename(sys.argv[0]))
 	parser.add_argument("--interval", type = int, default = 30)
 	parser.add_argument("--monitor-url")
-	parser.add_argument("config")
+	parser.add_argument("--monitor-sock")
+	parser.add_argument("config", nargs = '?')
 
 	args = parser.parse_args()
 	logging.basicConfig(level = args.verbose and logging.DEBUG or logging.INFO, format = constants.LOG_FORMAT, stream = sys.stderr)

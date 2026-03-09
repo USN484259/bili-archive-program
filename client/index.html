@@ -118,7 +118,7 @@ function add_new_entry(tbody_elem, path, entry, index) {
 		action_elem.append(zip_elem);
 	} else if (name.toLowerCase().startsWith("bv") && name.endsWith('/')) {
 		let bv_elem = document.createElement("a");
-		bv_elem.setAttribute("href", util.make_video_url(url));
+		util.make_video_url(bv_elem, url);
 		bv_elem.append("play");
 		action_elem.append(bv_elem);
 	} else if (name.endsWith(".flv") || name.endsWith(".m3u8")) {

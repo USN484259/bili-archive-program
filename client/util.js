@@ -1,12 +1,24 @@
 import * as config from "/config.js";
 
 
+function on_iframe_navigation(ev) {
+	let a = ev.target;
+	if (a && a.href) {
+		window.parent.postMessage({type: "open-tab", "target": a.href}, '*');
+		ev.preventDefault();
+	}
+}
+
 export function make_player_url(path) {
 	return config.player_url + "?path=" + path;
 }
 
-export function make_video_url(path) {
-	return config.video_page_url + "?path=" + path;
+export function make_video_url(obj, path) {
+	obj.href = config.video_page_url + "?path=" + path;
+	if (window.top !== window.self) {
+		// inside iframe
+		obj.addEventListener("click", on_iframe_navigation);
+	}
 }
 
 export function make_proxy_url(url) {

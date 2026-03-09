@@ -140,7 +140,7 @@ function show_suggestions(resp) {
 			if (!resp.ok)
 				return;
 			let href_elem = document.createElement("a");
-			href_elem.href = util.make_video_url(config.video_cache_root + info.bvid);
+			util.make_video_url(href_elem, config.video_cache_root + info.bvid);
 			href_elem.append(info.title);
 			title_elem.replaceChildren(href_elem);
 		});
@@ -316,6 +316,7 @@ async function main(util) {
 		let cover_path = path + cover_name;
 		let frame = document.getElementById("frame");
 		frame.setAttribute("src", cover_path);
+		frame.onerror = util.handle_legacy_cover_image;
 	}
 
 }

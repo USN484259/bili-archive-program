@@ -112,8 +112,7 @@ class TaskList {
 		// bvid
 		let bvid_elem = document.createElement("td")
 		let a_elem = document.createElement("a")
-		let url = util.make_video_url(config.video_cache_root + bvid)
-		a_elem.setAttribute("href", url)
+		util.make_video_url(a_elem, config.video_cache_root + bvid)
 
 		let title = bvid
 		try {

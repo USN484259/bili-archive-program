@@ -20,6 +20,14 @@
 	</div>
 	<button id="search" disabled>search</button>
 
+	<div class="pages-bar">
+		<span class="pages-btn"></span>
+		<span>
+			<input class="goto-input", type="number", min="1"/>
+			<button class="goto-button">goto</button>
+		</span>
+	</div>
+
 	<label for="results" id="status"></label>
 	<table id="results">
 		<thead>
@@ -35,11 +43,12 @@
 		<tbody>
 		</tbody>
 	</table>
-	<div id="pages-bar">
-		<span id="pages-btn"></span>
+
+	<div class="pages-bar">
+		<span class="pages-btn"></span>
 		<span>
-			<input id="goto-input", type="number", min="1"/>
-			<button id="goto-button">goto</button>
+			<input class="goto-input", type="number", min="1"/>
+			<button class="goto-button">goto</button>
 		</span>
 	</div>
 <style>
@@ -67,11 +76,11 @@
 .condition-row button {
 	padding: 2px 8px;
 }
-#pages-bar {
+.pages-bar {
 	margin-top: 10px;
 	text-align: center;
 }
-#pages-bar button {
+.pages-bar button {
 	margin: 0 2px;
 	padding: 2px 8px;
 }
@@ -122,6 +131,7 @@ function initSortKeys(key = "mtime") {
 		if (k === key) opt.selected = true;
 		sort_elem.appendChild(opt);
 	}
+	document.getElementById("sort_order").selectedIndex = 1;
 }
 
 function createConditionRow(key = "title", value = "") {
@@ -200,7 +210,7 @@ function renderResultsTable(data) {
 		tr.appendChild(coverTd);
 		const titleTd = document.createElement("td");
 		const hrefTd = document.createElement("a");
-		hrefTd.href = util.make_video_url(video_root + '/' + row.bvid)
+		util.make_video_url(hrefTd, video_root + '/' + row.bvid)
 		hrefTd.textContent = row.title;
 		titleTd.appendChild(hrefTd);
 		tr.appendChild(titleTd);
@@ -234,8 +244,7 @@ function create_page_spacing(bar, text) {
 	bar.appendChild(elem);
 }
 
-function renderPagesBar(count) {
-	const bar = document.getElementById("pages-btn");
+function renderPagesBar(bar, count) {
 	bar.innerHTML = "";
 	const totalPages = Math.max(1, Math.ceil(count / page_size));
 	const maxShow = 9;
@@ -252,7 +261,7 @@ function renderPagesBar(count) {
 	create_page_spacing(bar, "...");
 	create_page_button(bar, ">>", () => { page = Math.min(page + 1, totalPages - 1); update(); });
 
-	const goto_input = document.getElementById("goto-input");
+	const goto_input = bar.parentElement.querySelector(".goto-input");
 	goto_input.placeholder = totalPages.toString();
 	goto_input.max = totalPages.toString();
 }
@@ -266,7 +275,9 @@ async function update() {
 		let results = await query();
 		status.replaceChildren("" + results.count + " results, page " + (page + 1));
 		renderResultsTable(results.data);
-		renderPagesBar(results.count);
+		for (const bar of document.getElementsByClassName("pages-btn")) {
+			renderPagesBar(bar, results.count);
+		}
 	} finally {
 		searchBtn.disabled = false;
 	}
@@ -276,13 +287,12 @@ document.addEventListener("DOMContentLoaded", () => util_module.then((util) => {
 	globalThis.util = util;
 
 	const video_link = document.getElementById("video_link");
-	video_link.href = video_root + "index.html";
+	video_link.href = video_root + "/index.html";
 	video_link.append(video_root);
 
 	const list = document.getElementById("condition-list");
 	const addBtn = document.getElementById("add-condition");
 	const searchBtn = document.getElementById("search");
-	const gotoBtn = document.getElementById("goto-button");
 	addBtn.onclick = () => {
 		list.appendChild(createConditionRow());
 	};
@@ -291,15 +301,19 @@ document.addEventListener("DOMContentLoaded", () => util_module.then((util) => {
 		page = 0;
 		update();
 	};
-	gotoBtn.onclick = () => {
-		const goto_input = document.getElementById("goto-input");
-		let value = Number(goto_input.value);
-		if (value > 0) {
-			goto_input.value = "";
-			page = value - 1;
-			update();
-		}
-	};
+
+	const gotoBtn = document.getElementById("goto-button");
+	for (const gotoBtn of document.getElementsByClassName("goto-button")) {
+		gotoBtn.onclick = () => {
+			const goto_input = gotoBtn.parentElement.querySelector("input");
+			let value = Number(goto_input.value);
+			if (value > 0) {
+				goto_input.value = "";
+				page = value - 1;
+				update();
+			}
+		};
+	}
 	initSortKeys();
 	conditions = collectConditions();
 	update();
