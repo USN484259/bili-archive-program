@@ -42,6 +42,7 @@ async def record_main(rid, path, rec_log, relay_path):
 
 def exec_record(*args):
 	signal.signal(signal.SIGUSR1, signal.SIG_IGN)
+	signal.signal(signal.SIGUSR2, signal.SIG_IGN)
 	asyncio.run(record_main(*args))
 	os._exit(0)
 
@@ -104,6 +105,10 @@ class Config:
 		new_records = {}
 		for elem in user_list:
 			uid = elem["uid"]
+			if not elem.get("enable", True):
+				logger.debug("disabled %s", elem.get("name", str(uid)))
+				continue
+
 			elem["task"] = None
 			new_records[uid] = elem
 

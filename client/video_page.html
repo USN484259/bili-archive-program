@@ -8,13 +8,17 @@
 	<div class="info">
 		<div>
 			<span id="title"></span>
-			<span id="stat"></span>
+			<span id="stat" class="right"></span>
 		</div>
 		<div>
 			<span id="author"></span>
-			<span id="uptime"></span>
+			<span id="uptime" class="right"></span>
 		</div>
-
+		<div>
+			<span class="right">
+				<label><input type="checkbox" id="loop">loop&nbsp;</label>
+			</span>
+		</div>
 		<textarea id="desc" readonly></textarea>
 	</div>
 	<ul id="parts"></ul>
@@ -24,7 +28,7 @@
 			<button id="suggest">show suggestions</button>
 		</span>
 		<span>&nbsp;</span>
-		<span id="bvid"></span>
+		<span id="bvid" class="right"></span>
 	</div>
 	<table id="suggestions" hidden>
 		<thead>
@@ -70,7 +74,7 @@ body {
 	font-weight: bold;
 }
 
-#stat, #uptime, #bvid {
+.right {
 	float: right;
 }
 
@@ -319,6 +323,15 @@ async function main(util) {
 		frame.onerror = util.handle_legacy_cover_image;
 	}
 
+	addEventListener("message", (ev) => {
+		if (ev.data && ev.data.type == "playback" && ev.data.status) {
+			let loopElement = document.getElementById("loop");
+			if (loopElement.checked && ev.data.status == "ended") {
+				let frame = document.getElementById("frame");
+				frame.contentWindow.postMessage({type: "playback", command: "restart"});
+			}
+		}
+	});
 }
 
 addEventListener("DOMContentLoaded", () => util_module.then(main));

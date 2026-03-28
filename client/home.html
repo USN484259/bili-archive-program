@@ -1,56 +1,191 @@
 <!DOCTYPE html>
+<!-- This file contains code written by Copilot, GPT 4.1 -->
 <html>
 <head>
 	<meta charset="utf-8">
 </head>
 <body>
-	<div class="tab_head">
-		<button onclick="switch_tab(0)">Video fetch</button>
-		<button onclick="switch_tab(1)">Fetched videos</button>
-		<button onclick="switch_tab(2)">Video search</button>
-		<button onclick="switch_tab(3)">Live status</button>
-	</div>
-
-	<div id="tab_content">
-		<iframe src="/video_fetch.html"></iframe>
-		<iframe src="/video_search.html?db=/cache/database/video.db&path=/cache/video"></iframe>
-		<iframe src="/video_search.html?db=/bili-arch/database/video.db&path=/bili-arch/video"></iframe>
-		<iframe src="/live_page.html"></iframe>
-	</div>
+	<div class="tab_head" id="tab_head"></div>
+	<div id="tab_content"></div>
 	<style>
-
+.tab_head {
+	display: flex;
+	border-bottom: 1.5px solid #aaa;
+	background: #f5f5f5;
+	padding-left: 8px;
+}
+.tab {
+	display: flex;
+	align-items: center;
+	padding: 6px 18px 6px 12px;
+	margin-right: 2px;
+	border: 1px solid #aaa;
+	border-bottom: none;
+	border-radius: 8px 8px 0 0;
+	background: #e9e9e9;
+	cursor: pointer;
+	position: relative;
+	font-size: 15px;
+	user-select: none;
+}
+.tab.active {
+	background: #fff;
+	border-bottom: 1.5px solid #fff;
+	font-weight: bold;
+	z-index: 2;
+}
+.tab .close {
+	margin-left: 8px;
+	font-size: 15px;
+	color: #888;
+	cursor: pointer;
+	padding: 0 4px;
+	border-radius: 50%;
+	transition: background 0.2s;
+}
+.tab .close:hover {
+	background: #fbb;
+	color: #c00;
+}
 iframe {
 	width: 100%;
 	height: 100vh;
 	object-fit: contain;
+	border: none;
 }
-
-	</style>
+#tab_content {
+	position: relative;
+	z-index: 1;
+}
+</style>
 	<script>
 
 const tab_pattern = new RegExp("^#(\\d+)");
 
+// Initial tabs
+const default_tabs = [
+	{title: "Video fetch", url: "/video_fetch.html"},
+	{title: "Fetched videos", url: "/video_search.html?db=/cache/database/video.db&path=/cache/video"},
+	{title: "Video search", url: "/video_search.html?db=/bili-arch/database/video.db&path=/bili-arch/video"},
+	{title: "Live status", url: "/live_page.html"}
+];
+let tabs = [];
+let active_tab = 0;
 
-function switch_tab(tab_index) {
-	let tab_content = document.getElementById("tab_content").children;
-	for (let i = 0; i < tab_content.length; i++) {
-		tab_content[i].hidden = (i != tab_index);
+function render_tabs() {
+	const tab_head = document.getElementById("tab_head");
+	tab_head.innerHTML = "";
+	tabs.forEach((tab, i) => {
+		const tabEl = document.createElement("div");
+		tabEl.className = "tab" + (i === active_tab ? " active" : "");
+		tabEl.textContent = tab.title;
+		tabEl.title = tab.url;
+		// Close icon
+		const close = document.createElement("span");
+		close.className = "close";
+		close.textContent = "✕";
+		close.onclick = (e) => { e.stopPropagation(); close_tab(i); };
+		tabEl.appendChild(close);
+		tabEl.onclick = (e) => { if (e.button === 0) switch_tab(i); };
+		tabEl.onauxclick = (e) => { if (e.button === 1) { close_tab(i); e.preventDefault(); } };
+		tab_head.appendChild(tabEl);
+	});
+}
+
+function render_iframes() {
+	const tab_content = document.getElementById("tab_content");
+	// Only create iframes if not already present
+	if (!tab_content._iframes) {
+		tab_content._iframes = [];
+		tabs.forEach((tab, i) => {
+			const iframe = document.createElement("iframe");
+			iframe.src = tab.url;
+			iframe.hidden = (i !== active_tab);
+			tab_content.appendChild(iframe);
+			tab_content._iframes.push(iframe);
+		});
+	} else {
+		// Add new iframes for new tabs
+		for (let i = tab_content._iframes.length; i < tabs.length; i++) {
+			const iframe = document.createElement("iframe");
+			iframe.src = tabs[i].url;
+			iframe.hidden = (i !== active_tab);
+			tab_content.appendChild(iframe);
+			tab_content._iframes.push(iframe);
+		}
+		// Remove iframes for closed tabs
+		while (tab_content._iframes.length > tabs.length) {
+			let removed = tab_content._iframes.pop();
+			tab_content.removeChild(removed);
+		}
+		// Update visibility
+		tab_content._iframes.forEach((iframe, i) => {
+			iframe.hidden = (i !== active_tab);
+		});
 	}
 }
 
+function switch_tab(tab_index) {
+	if (tab_index < 0 || tab_index >= tabs.length) return;
+	active_tab = tab_index;
+	render_tabs();
+	render_iframes();
+	location.hash = `#${tab_index}`;
+}
+
+function close_tab(tab_index) {
+	if (tabs.length === 1) return;
+	tabs.splice(tab_index, 1);
+	// Remove iframe for closed tab if present
+	const tab_content = document.getElementById("tab_content");
+	if (tab_content._iframes) {
+		let removed = tab_content._iframes.splice(tab_index, 1)[0];
+		tab_content.removeChild(removed);
+	}
+	if (active_tab >= tabs.length) active_tab = tabs.length - 1;
+	render_tabs();
+	render_iframes();
+	location.hash = `#${active_tab}`;
+}
+
+function open_tab(title, url) {
+	// If already open, switch to it
+	let idx = tabs.findIndex(t => t.url === url);
+	if (idx !== -1) {
+		switch_tab(idx);
+		return;
+	}
+	tabs.push({title, url});
+	// Add iframe for new tab
+	const tab_content = document.getElementById("tab_content");
+	if (tab_content._iframes) {
+		const iframe = document.createElement("iframe");
+		iframe.src = url;
+		iframe.hidden = true;
+		tab_content.appendChild(iframe);
+		tab_content._iframes.push(iframe);
+	}
+	switch_tab(tabs.length - 1);
+}
+
 addEventListener("DOMContentLoaded", () => {
+	tabs = default_tabs.map(t => ({...t}));
 	let match = location.hash.match(tab_pattern);
 	let tab_index = (match) ? parseInt(match[1]) : 0;
-
-	switch_tab(tab_index);
+	if (tab_index < 0 || tab_index >= tabs.length) tab_index = 0;
+	active_tab = tab_index;
+	render_tabs();
+	render_iframes();
 });
 
 addEventListener("message", (ev) => {
-	if (ev.data && ev.data.type == "open-tab") {
-		console.log(ev.data.target);
+	if (ev.data && ev.data.type == "open-tab" && ev.data.target) {
+		let url = ev.data.target;
+		let title = ev.data.title || url;
+		open_tab(title, url);
 	}
 });
 
-	</script>
+</script>
 </body>
 </html>

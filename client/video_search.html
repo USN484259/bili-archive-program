@@ -1,5 +1,5 @@
-<!-- This file contains code written by Copilot, GPT 4.1 -->
 <!DOCTYPE html>
+<!-- This file contains code written by Copilot, GPT 4.1 -->
 <html>
 <head>
 	<meta charset="utf-8">
@@ -18,7 +18,19 @@
 			<option value="-" selected>descending</option>
 		</select>
 	</div>
-	<button id="search" disabled>search</button>
+	<div id="controls">
+		<button id="search" disabled>search</button>
+		<button id="reset">reset</button>
+
+		<div id="selection">
+			<span id="selected-count">0 selected</span>
+			<button id="deselect">Clear selection</button>
+			<button id="copy-button">Copy to clipboard</button>
+		</div>
+	</div>
+	<div>
+		<textarea id="output" readonly hidden></textarea>
+	</div>
 
 	<div class="pages-bar">
 		<span class="pages-btn"></span>
@@ -60,10 +72,32 @@
 	align-items: center;
 	margin: 4px;
 }
+#controls {
+	display: flex;
+}
 #search {
 	font-weight: bold;
+	align-self: center;
 	padding: 10px;
 }
+#reset {
+	align-self: center;
+}
+#selection {
+	margin-left: auto;
+	display: flex;
+	flex-direction: column;
+}
+#selected-count {
+	margin-left:10px;
+}
+
+#output {
+	width: 100%;
+	height: 40px;
+	resize: vertical;
+}
+
 .condition-row {
 	display: flex;
 	align-items: center;
@@ -100,6 +134,9 @@ tbody tr:nth-child(odd) {
 tbody tr:nth-child(even) {
 	background-color: #eeeeee;
 }
+.selected-row {
+	background-color: #a0d8ef !important;
+}
 </style>
 
 	<script type="module">
@@ -108,11 +145,16 @@ import * as config from "/config.js";
 const util_module = import(config.util_module);
 const params = new URLSearchParams(window.location.search);
 const db_path = decodeURIComponent(params.get("db"));
-const video_root = decodeURIComponent(params.get("path"));
+let video_root = decodeURIComponent(params.get("path"));
+if (!video_root.endsWith('/'))
+	video_root += '/';
 
-const page_size = 40;
+const page_size = 20;
 let conditions = [];
 let page = 0;
+
+let selectedBvidSet = null;
+
 
 const sort_keys = [
 	"mtime", "title", "tags", "parts", "duration", "ctime", "pubtime", "views", "uname", "uid"
@@ -200,7 +242,7 @@ function renderResultsTable(data) {
 		const coverTd = document.createElement("td");
 		if (row.cover) {
 			const img = document.createElement("img");
-			img.src = video_root + '/' + row.bvid + '/' + row.cover;
+			img.src = video_root + row.bvid + '/' + row.cover;
 			img.style.maxWidth = "120px";
 			img.style.maxHeight = "80px";
 			img.setAttribute("loading", "lazy");
@@ -210,7 +252,7 @@ function renderResultsTable(data) {
 		tr.appendChild(coverTd);
 		const titleTd = document.createElement("td");
 		const hrefTd = document.createElement("a");
-		util.make_video_url(hrefTd, video_root + '/' + row.bvid)
+		util.make_video_url(hrefTd, video_root + row.bvid)
 		hrefTd.textContent = row.title;
 		titleTd.appendChild(hrefTd);
 		tr.appendChild(titleTd);
@@ -226,8 +268,71 @@ function renderResultsTable(data) {
 		const mtimeTd = document.createElement("td");
 		mtimeTd.textContent = util.localtime_string(row.mtime * 1000);
 		tr.appendChild(mtimeTd);
+
+		tr.addEventListener("click", (e) => {
+			if (e.target !== hrefTd)
+				handleRowClick(tr, row.bvid);
+		});
+		if (selectedBvidSet.has(row.bvid)) {
+			tr.classList.add("selected-row");
+		}
+
 		tbody.appendChild(tr);
 	}
+}
+
+function cleanResultsTable() {
+	const tbody = document.querySelector("#results tbody");
+	for (let tr of tbody.children) {
+		tr.classList.remove("selected-row");
+	}
+}
+
+function saveSession(save_conds) {
+	try {
+		sessionStorage.setItem("video_search_page", page);
+		if (save_conds) {
+			const sort = document.getElementById("sort_keys").value;
+			const order = document.getElementById("sort_order").value;
+			sessionStorage.setItem("video_search_conditions", JSON.stringify(conditions));
+			sessionStorage.setItem("video_search_sort", sort);
+			sessionStorage.setItem("video_search_order", order);
+		}
+	} catch {}
+}
+
+function loadSession() {
+	try {
+		const list = document.getElementById("condition-list");
+		let conds = sessionStorage.getItem("video_search_conditions");
+		let sort = sessionStorage.getItem("video_search_sort");
+		let order = sessionStorage.getItem("video_search_order");
+		let savedPage = sessionStorage.getItem("video_search_page");
+		if (conds) {
+			try {
+				conds = JSON.parse(conds);
+				list.innerHTML = "";
+				for (const [key, value] of conds) {
+					if (key !== "order") list.appendChild(createConditionRow(key, value));
+				}
+			} catch {}
+		}
+		if (sort) {
+			const sortElem = document.getElementById("sort_keys");
+			for (let i = 0; i < sortElem.options.length; ++i) {
+				if (sortElem.options[i].value === sort) sortElem.selectedIndex = i;
+			}
+		}
+		if (order) {
+			const orderElem = document.getElementById("sort_order");
+			for (let i = 0; i < orderElem.options.length; ++i) {
+				if (orderElem.options[i].value === order) orderElem.selectedIndex = i;
+			}
+		}
+		if (savedPage) {
+			page = parseInt(savedPage) || 0;
+		}
+	} catch {}
 }
 
 function create_page_button(bar, text, func, active = false) {
@@ -251,15 +356,15 @@ function renderPagesBar(bar, count) {
 	let start = Math.max(0, page - Math.floor(maxShow / 2));
 	let end = Math.min(totalPages, start + maxShow);
 	if (end - start < maxShow) start = Math.max(0, end - maxShow);
-	create_page_button(bar, "<<", () => { page = Math.max(0, page - 1); update(); });
+	create_page_button(bar, "<<", () => { page = Math.max(0, page - 1); saveSession(false); update(); });
 	create_page_spacing(bar, "...");
 
 	for (let i = start; i < end; ++i) {
-		create_page_button(bar, (i + 1).toString(), () => { page = i; update(); }, (i == page));
+		create_page_button(bar, (i + 1).toString(), () => { page = i; saveSession(false); update(); }, (i == page));
 	}
 
 	create_page_spacing(bar, "...");
-	create_page_button(bar, ">>", () => { page = Math.min(page + 1, totalPages - 1); update(); });
+	create_page_button(bar, ">>", () => { page = Math.min(page + 1, totalPages - 1); saveSession(false); update(); });
 
 	const goto_input = bar.parentElement.querySelector(".goto-input");
 	goto_input.placeholder = totalPages.toString();
@@ -268,9 +373,9 @@ function renderPagesBar(bar, count) {
 
 async function update() {
 	const searchBtn = document.getElementById("search");
+	let status = document.getElementById("status");
 	searchBtn.disabled = true;
 	try {
-		let status = document.getElementById("status");
 		status.replaceChildren("searching");
 		let results = await query();
 		status.replaceChildren("" + results.count + " results, page " + (page + 1));
@@ -278,8 +383,38 @@ async function update() {
 		for (const bar of document.getElementsByClassName("pages-btn")) {
 			renderPagesBar(bar, results.count);
 		}
+	} catch {
+		status.replaceChildren("search failed");
 	} finally {
 		searchBtn.disabled = false;
+	}
+}
+
+function updateSelectedCount() {
+	const countSpan = document.getElementById("selected-count");
+	countSpan.textContent = `${selectedBvidSet.size} selected`;
+}
+
+function handleRowClick(tr, bvid) {
+	if (selectedBvidSet.has(bvid)) {
+		selectedBvidSet.delete(bvid);
+		tr.classList.remove("selected-row");
+	} else {
+		selectedBvidSet.add(bvid);
+		tr.classList.add("selected-row");
+	}
+	updateSelectedCount();
+}
+
+function copySelectedBvids() {
+	if (selectedBvidSet !== null && selectedBvidSet.size > 0) {
+		const text = Array.from(selectedBvidSet).join(" ");
+		try {
+			navigator.clipboard.writeText(text);
+		} catch {}
+		const output = document.getElementById("output");
+		output.value = text;
+		output.hidden = false;
 	}
 }
 
@@ -287,22 +422,43 @@ document.addEventListener("DOMContentLoaded", () => util_module.then((util) => {
 	globalThis.util = util;
 
 	const video_link = document.getElementById("video_link");
-	video_link.href = video_root + "/index.html";
+	video_link.href = video_root + "index.html";
 	video_link.append(video_root);
 
 	const list = document.getElementById("condition-list");
 	const addBtn = document.getElementById("add-condition");
 	const searchBtn = document.getElementById("search");
+	const resetBtn = document.getElementById("reset");
+	const selectionBtn = document.getElementById("deselect");
+	const copyBtn = document.getElementById("copy-button");
+	const outputArea = document.getElementById("output");
+
 	addBtn.onclick = () => {
 		list.appendChild(createConditionRow());
 	};
 	searchBtn.onclick = () => {
 		conditions = collectConditions();
 		page = 0;
+		saveSession(true);
+		update();
+	};
+	resetBtn.onclick = () => {
+		sessionStorage.clear();
+		list.innerHTML = "";
+		initSortKeys();
+		page = 0;
+		conditions = collectConditions();
 		update();
 	};
 
-	const gotoBtn = document.getElementById("goto-button");
+	selectionBtn.addEventListener("click", (e) => {
+		selectedBvidSet.clear();
+		cleanResultsTable();
+		updateSelectedCount();
+		outputArea.hidden = true;
+	});
+	copyBtn.addEventListener("click", copySelectedBvids);
+
 	for (const gotoBtn of document.getElementsByClassName("goto-button")) {
 		gotoBtn.onclick = () => {
 			const goto_input = gotoBtn.parentElement.querySelector("input");
@@ -310,11 +466,18 @@ document.addEventListener("DOMContentLoaded", () => util_module.then((util) => {
 			if (value > 0) {
 				goto_input.value = "";
 				page = value - 1;
+				saveSession(false);
 				update();
 			}
 		};
 	}
 	initSortKeys();
+	loadSession();
+
+	if (selectedBvidSet == null)
+		selectedBvidSet = new Set();
+	updateSelectedCount();
+
 	conditions = collectConditions();
 	update();
 }));

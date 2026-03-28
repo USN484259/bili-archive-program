@@ -18,7 +18,7 @@ import constants
 
 # constants
 
-cmp_pattern = re.compile(r"\s*([<=>]=?|<>|!=)\s*(\d+)\s*")
+cmp_pattern = re.compile(r"\s*([<=>]=?|<>|!=)?\s*(\d+)\s*")
 
 ## sql helper functions
 def make_sql_column_def(desc, extra = None):
@@ -34,7 +34,7 @@ def make_sql_placeholder(desc):
 def parse_cmp(value):
 	res = cmp_pattern.fullmatch(value)
 	if res:
-		return res.group(1), res.group(2)
+		return (res.group(1) or "="), res.group(2)
 
 
 ## table definition
