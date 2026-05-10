@@ -40,7 +40,7 @@
 		</span>
 	</div>
 
-	<label for="results" id="status"></label>
+	<span id="status"></span>
 	<table id="results">
 		<thead>
 			<tr>
@@ -376,15 +376,15 @@ async function update() {
 	let status = document.getElementById("status");
 	searchBtn.disabled = true;
 	try {
-		status.replaceChildren("searching");
+		status.innerText = "searching";
 		let results = await query();
-		status.replaceChildren("" + results.count + " results, page " + (page + 1));
+		status.innerText = "" + results.count + " results, page " + (page + 1);
 		renderResultsTable(results.data);
 		for (const bar of document.getElementsByClassName("pages-btn")) {
 			renderPagesBar(bar, results.count);
 		}
 	} catch {
-		status.replaceChildren("search failed");
+		status.innerText = "search failed";
 	} finally {
 		searchBtn.disabled = false;
 	}

@@ -146,7 +146,8 @@ function show_suggestions(resp) {
 			let href_elem = document.createElement("a");
 			util.make_video_url(href_elem, config.video_cache_root + info.bvid);
 			href_elem.append(info.title);
-			title_elem.replaceChildren(href_elem);
+			title_elem.innerText = "";
+			title_elem.appendChild(href_elem);
 		});
 
 		let author_elem = document.createElement("td");

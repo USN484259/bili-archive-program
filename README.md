@@ -152,7 +152,7 @@ sudo chmod 0775 /srv/http/html /srv/http/fcgi
 
 # 初始化html目录
 cd /srv/http/html
-for f in ../code/client/*.html
+for f in ../code/frontend/*.html
 do
 	ln -s $f
 done
@@ -175,7 +175,7 @@ for f in constants.py core.py runtime.py network.py verify.py video.py
 do
 	ln -s ../code/$f
 done
-for f in ../code/server/*.py
+for f in ../code/backend/*.py
 do
 	ln -s $f
 done

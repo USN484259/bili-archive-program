@@ -135,7 +135,7 @@ function build_live_list() {
 		inactive_room.replaceChild(inactive_tbody, inactive_old_tbody)
 
 		let title_elem = document.getElementById("title")
-		title_elem.replaceChildren("Active live rooms: " + active_count + '/' + Object.keys(live_status).length)
+		title_elem.innerText = "Active live rooms: " + active_count + '/' + Object.keys(live_status).length;
 	});
 }
 

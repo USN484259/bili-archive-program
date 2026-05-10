@@ -92,7 +92,7 @@ class LiveDanmaku:
 				url = "wss://%s:%d/sub" % (host_info.get("host"), host_info.get("wss_port"))
 				await self.stall()
 				logger.info("connecting to live danmaku %s [%d/%d]", self.rid, index + 1, len(self.hosts))
-				self.conn = await ws_connect(url, user_agent_header = core.USER_AGENT["User-Agent"])
+				self.conn = await ws_connect(url, user_agent_header = core.USER_AGENT["User-Agent"], ping_timeout = None)
 				await self.send_verity()
 				return index
 			except Exception as e:

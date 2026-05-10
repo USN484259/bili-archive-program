@@ -5,7 +5,7 @@
 </head>
 <body>
 	<h1 id="title"></h1>
-	<label for="dir_listing" id="summary">loading</label>
+	<span id="summary">loading</span>
 	<table id="dir_listing">
 		<thead>
 			<tr>
@@ -203,8 +203,8 @@ async function main(util) {
 		}
 	}
 
-	let summary_elem = document.getElementById("summary")
-	summary_elem.replaceChildren("total items: " + count)
+	let summary_elem = document.getElementById("summary");
+	summary_elem.innerText = "total items: " + count;
 
 }
 
