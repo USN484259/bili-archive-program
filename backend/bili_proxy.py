@@ -93,7 +93,7 @@ class bili_proxy_handler(HttpResponseMixin, FcgiHandler):
 			except network.BiliApiError as e:
 				return self.send_response(403, data = str(e))
 
-			return self.send_response(200, mime_type = "application/json", data = resp)
+			return self.send_response(200, json = resp)
 
 		except Exception:
 			logger.exception("error in handle request")

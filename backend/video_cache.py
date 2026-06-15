@@ -182,7 +182,7 @@ class bv_play_handler(HttpResponseMixin, FcgiHandler):
 						since = int(query["since"][0])
 
 				result = self.server.status(since)
-				return self.send_response(200, "application/json", result)
+				return self.send_response(200, json = result)
 
 			else:	# POST
 				try:
@@ -216,7 +216,7 @@ class bv_play_handler(HttpResponseMixin, FcgiHandler):
 
 				result = self.server.schedule(bvid, args)
 				if result:
-					return self.send_response(200, "application/json", result)
+					return self.send_response(200, json = result)
 				else:
 					return self.send_response(429)
 

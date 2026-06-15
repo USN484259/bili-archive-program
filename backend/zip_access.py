@@ -112,7 +112,7 @@ class zip_access_handler(HttpResponseMixin, FcgiHandler):
 
 				return self.send_response(200, mime_type = "application/x-ndjson", data = gen)
 			else:
-				return self.send_response(200, mime_type = "application/json", data = dir_list)
+				return self.send_response(200, json = dir_list)
 
 
 	def handle_file(self, archive, filename):

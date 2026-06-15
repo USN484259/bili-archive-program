@@ -52,7 +52,7 @@ class QueryHandler(HttpResponseMixin, FcgiHandler):
 				return self.send_response(400)
 			try:
 				result, count = db.query(rules)
-				return self.send_response(200, "application/json", {"count": count, "data": result})
+				return self.send_response(200, json = {"count": count, "data": result})
 			except Exception:
 				return self.send_response(400)
 

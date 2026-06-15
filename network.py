@@ -168,11 +168,11 @@ async def fetch(sess, url, path, **kwargs):
 
 				if runtime.bandwidth_limit:
 					cur_timestamp = time.monotonic()
-					time_diff = cur_timestamp - last_timestamp
+					diff_time = cur_timestamp - last_timestamp
 					expect_time = len(chunk) / runtime.bandwidth_limit
-					time_wait = int(expect_time - time_diff)
-					if time_diff > 0 and time_wait > 0:
-						await asyncio.sleep(time_wait)
+					wait_time = expect_time - diff_time
+					if diff_time > 0 and wait_time > 0:
+						await asyncio.sleep(wait_time)
 						cur_timestamp = time.monotonic()
 					last_timestamp = cur_timestamp
 

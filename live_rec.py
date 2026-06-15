@@ -98,7 +98,7 @@ def find_best_url(info, *, prefer = "", reject = ""):
 # methods
 
 def make_record_name(uname, title):
-	return (uname + '_' + title + '_').translate(name_escape_table) + time.strftime("%y_%m_%d_%H_%M")
+	return (uname + time.strftime("_%y_%m_%d_%H_%M_") + title).translate(name_escape_table)
 
 
 async def record_flv(sess, info, name_prefix):
@@ -172,7 +172,7 @@ async def record_danmaku(rid, path, /, relay_path = None, *, fetch_images = True
 
 	danmaku_file_name = os.path.join(path, "danmaku.ndjson")
 	logger.info("recording %s danmaku into %s", rid, danmaku_file_name)
-	with core.locked_file(danmaku_file_name, "a") as f:
+	with core.locked_file(danmaku_file_name, "a", buffering = 1) as f:
 		async with AsyncExitStack() as stack:
 			relay_server = None
 			live_danmaku = await stack.enter_async_context(LiveDanmaku(rid))
