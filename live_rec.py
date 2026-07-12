@@ -9,7 +9,8 @@ import logging
 import functools
 from contextlib import suppress, AsyncExitStack
 
-import core
+from constants import default_names
+import fops
 import runtime
 import network
 import hls
@@ -107,7 +108,7 @@ async def record_flv(sess, info, name_prefix):
 
 	def on_file_open(*args):
 		connected = True
-		return core.locked_file(*args)
+		return fops.locked_file(*args)
 
 	for url_info in info.get("url_info"):
 		try:
@@ -125,7 +126,7 @@ async def record_hls(sess, info, name_prefix):
 	url_info_list = info.get("url_info")
 	last_url_index = 0
 	cur_url_index = 0
-	with core.locked_file(name_prefix + ".zip", "x+b") as zip_file:
+	with fops.locked_file(name_prefix + ".zip", "x+b") as zip_file:
 		with zipfile.ZipFile(zip_file, mode = "w") as archive:
 			m3u = hls.M3u()
 			stall = None
@@ -162,7 +163,7 @@ async def record_hls(sess, info, name_prefix):
 
 			finally:
 				file_time = time.gmtime()
-				file_info = zipfile.ZipInfo(core.default_names.hls_index, file_time)
+				file_info = zipfile.ZipInfo(default_names.hls_index, file_time)
 				with archive.open(file_info, "w") as f:
 					m3u.dump(f)
 
@@ -172,14 +173,14 @@ async def record_danmaku(rid, path, /, relay_path = None, *, fetch_images = True
 
 	danmaku_file_name = os.path.join(path, "danmaku.ndjson")
 	logger.info("recording %s danmaku into %s", rid, danmaku_file_name)
-	with core.locked_file(danmaku_file_name, "a", buffering = 1) as f:
+	with fops.locked_file(danmaku_file_name, "a", buffering = 1) as f:
 		async with AsyncExitStack() as stack:
 			relay_server = None
 			live_danmaku = await stack.enter_async_context(LiveDanmaku(rid))
 			fetcher = await stack.enter_async_context(network.image_fetcher())
 			if relay_path:
 				try:
-					relay_sock_name = os.path.join(relay_path, core.default_names.danmaku_socket)
+					relay_sock_name = os.path.join(relay_path, default_names.danmaku_socket)
 					relay_server = await stack.enter_async_context(DanmakuRelay(relay_sock_name))
 				except Exception:
 					logger.exception("cannot create DanmakuRelay at %s", relay_path)
@@ -227,7 +228,7 @@ async def record(sess, rid, path, *, do_record_danmaku = True, relay_path = None
 
 		if relay_path:
 			try:
-				core.mkdir(relay_path)
+				fops.mkdir(relay_path)
 			except Exception:
 				logger.exception("cannot create relay path %s", relay_path)
 
@@ -309,7 +310,7 @@ async def main(args):
 
 				if status == 1:
 					rec_name = make_record_name(user_info.get("uname", str(uid)), info.get("title"))
-					with core.locked_path(live_root, rec_name) as rec_path:
+					with fops.locked_path(live_root, rec_name) as rec_path:
 						await record(sess, args.room, rec_path, do_record_danmaku = (not args.no_danmaku), relay_path = args.relay, prefer = args.prefer, reject = args.reject)
 
 			except Exception:

@@ -9,6 +9,7 @@ import json
 import time
 import zipfile
 import mimetypes
+from functools import partial
 from urllib.parse import parse_qs
 from simple_fastcgi import FcgiThreadingServer, HttpResponseMixin, FcgiHandler
 
@@ -87,32 +88,39 @@ class zip_access_handler(HttpResponseMixin, FcgiHandler):
 			return self.send_response(206, mime_type = content_type, extra_headers = (length_str, range_str), data = file_content_gen)
 
 
-	def handle_dir(self, archive, path):
-		dir_list = []
+	@staticmethod
+	def dir_listing(archive, path, ndjson = False):
+		count = 0
+		prepend = (not ndjson) and "[\n" or ""
 		for info in archive.infolist():
 			dirname, filename = os.path.split(info.filename.rstrip('/'))
 			if dirname != path:
 				continue
 
-			dir_list.append({
+			yield "%s%s\n" % (prepend, json.dumps({
 				"name": filename,
 				"type": info.is_dir() and "dir" or "file",
 				"size": info.file_size,
 				"mtime": int(time.mktime(info.date_time + (0, 0, 0)) * 1000),
-			})
+			}, ensure_ascii = False))
+			count += 1
+			if prepend:
+				prepend = ",\n"
 
-		if not dir_list:
+		if count == 0:
+			raise FileNotFoundError(path)
+		if not ndjson:
+			yield "]\n"
+
+
+	def handle_dir(self, archive, path):
+		accept = self.environ.get("HTTP_ACCEPT")
+		is_ndjson = (accept and "ndjson" in accept)
+		try:
+			func = partial(self.dir_listing, archive, path, is_ndjson)
+			return self.send_response(200, is_ndjson and "application/x-ndjson" or "application/json", data = func)
+		except FileNotFoundError:
 			return self.send_response(404)
-		else:
-			accept = self.environ.get("HTTP_ACCEPT")
-			if accept and "ndjson" in accept:
-				def gen():
-					for entry in dir_list:
-						yield json.dumps(entry, ensure_ascii = False) + '\n'
-
-				return self.send_response(200, mime_type = "application/x-ndjson", data = gen)
-			else:
-				return self.send_response(200, json = dir_list)
 
 
 	def handle_file(self, archive, filename):

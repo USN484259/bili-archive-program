@@ -8,20 +8,21 @@ import shutil
 import logging
 import zipfile
 import collections
-
-if sys.platform != "win32":
-	import fcntl
-else:
-	fcntl = None
+from contextlib import suppress
+import fcntl
+import socket
 
 # constants
 
-from constants import *
+from constants import default_names
 
 
 # static objects
 
-logger = logging.getLogger("bili_arch.core")
+logger = logging.getLogger("bili_arch.fops")
+
+## paths
+
 
 
 ## file management
@@ -38,8 +39,6 @@ def mkdir(path):
 
 def locked_file(filename, mode, **kwargs):
 	f = open(filename, mode = mode, **kwargs)
-	if not fcntl:
-		return f
 	if 'r' in mode and '+' not in mode:
 		lock_mode = fcntl.LOCK_SH
 	else:
@@ -129,8 +128,6 @@ class locked_path(os.PathLike):
 	def __init__(self, *path_list, shared = False):
 		self.path = os.path.join(*path_list)
 		mkdir(self.path)
-		if not fcntl:
-			return
 		self.fd = os.open(self.path, os.O_RDONLY | os.O_DIRECTORY)
 		lock_mode = (shared and fcntl.LOCK_SH or fcntl.LOCK_EX)
 		try:
@@ -152,8 +149,22 @@ class locked_path(os.PathLike):
 		self.close()
 
 	def close(self):
-		if not fcntl:
-			return
 		if self.fd is not None:
 			os.close(self.fd)
 			self.fd = None
+
+
+def create_unix_socket(path, *, mode = 0o600):
+	logger.debug("creating unix socket %s", path)
+	# https://stackoverflow.com/questions/11781134/change-linux-socket-file-permissions
+	sock = socket.socket(socket.AF_UNIX)
+	try:
+		os.fchmod(sock.fileno(), 0o600)
+		with suppress(FileNotFoundError):
+			os.unlink(path)
+		sock.bind(path)
+		os.chmod(path, mode)
+		return sock
+	except:
+		sock.close()
+		raise

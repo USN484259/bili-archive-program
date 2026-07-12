@@ -12,8 +12,10 @@ try:
 except ModuleNotFoundError:
 	from xml.sax import make_parser as xml_make_parser
 
-import core
+from constants import default_names
 import runtime
+
+from utils import list_bv
 
 
 logger = logging.getLogger("bili_arch.verify")
@@ -191,21 +193,21 @@ def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, du
 				logger.debug("file %s", filename)
 				ext = os.path.splitext(filename)[1].lower()
 
-				if ext == core.default_names.tmp_ext:
+				if ext == default_names.tmp_ext:
 					logger.debug("skip tmp file")
 					continue
 
-				if filename == core.default_names.novideo:
+				if filename == default_names.novideo:
 					logger.info("found no-video stub")
 					no_video = True
 					continue
 
-				if filename == core.default_names.noaudio:
+				if filename == default_names.noaudio:
 					logger.info("found no-audio stub")
 					no_audio = True
 					continue
 
-				if filename == core.default_names.danmaku and 'D' not in ignore:
+				if filename == default_names.danmaku and 'D' not in ignore:
 					logger.debug("type: danmaku")
 					if scan_files:
 						try:
@@ -342,7 +344,7 @@ def main(args):
 		bv_list = args.inputs
 	else:
 		logger.debug("scan BV in %s", video_root)
-		bv_list = runtime.list_bv(video_root)
+		bv_list = list_bv(video_root)
 
 	logger.info("BV count %d", len(bv_list))
 

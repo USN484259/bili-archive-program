@@ -7,7 +7,9 @@ import asyncio
 import logging
 import argparse
 
-import core
+import constants
+import fops
+from utils import logger_init, parse_size
 
 # static objects
 
@@ -19,7 +21,6 @@ root_dir = "."
 credential = {}
 
 logger = logging.getLogger("bili_arch.runtime")
-img_pattern = re.compile(r"^http.?://[^/]+hdslb[.]com/.+/([^/.]+\.[^/.]+)$")
 
 standard_args = {
 	"auth": [
@@ -64,30 +65,9 @@ def load_credential(auth_file):
 
 ## startup & runtime
 
-def logging_init(level, /, log_file = None, *, no_stderr = False):
-	global log_level
-
-	extra_args = {}
-	if no_stderr:
-		if not log_file:
-			raise RuntimeError("missing log_file")
-		extra_args = {"filename": log_file}
-
-	logging.basicConfig(level = level, format = core.LOG_FORMAT, force = True, **extra_args)
-	log_level = level
-	root_logger = logging.getLogger()
-
-	if (not no_stderr) and log_file:
-		handler = logging.FileHandler(log_file, delay = True)
-		handler.setFormatter(logging.Formatter(core.LOG_FORMAT))
-		root_logger.addHandler(handler)
-
-	filter_func = lambda rec: rec.levelno > level or rec.name.startswith("bili_arch")
-	for handler in root_logger.handlers:
-		handler.addFilter(filter_func)
-
 
 def parse_args(std_args, extra_args = (), *, arg_list = None, opt_auth = False):
+	global log_level
 	global http_timeout
 	global default_stall_time
 	global bandwidth_limit
@@ -109,8 +89,8 @@ def parse_args(std_args, extra_args = (), *, arg_list = None, opt_auth = False):
 
 	args = parser.parse_args(arg_list)
 
-	log_level = logging.INFO + 10 * (args.quiet - args.verbose)
-	logging_init(log_level, args.log)
+	log_level = args.verbose - args.quiet
+	logger_init(log_level, args.log)
 
 	if getattr(args, "stall", None):
 		default_stall_time = float(args.stall)
@@ -119,7 +99,7 @@ def parse_args(std_args, extra_args = (), *, arg_list = None, opt_auth = False):
 		http_timeout = int(args.timeout)
 
 	if getattr(args, "bandwidth", None):
-		bandwidth_limit = core.number_with_unit(args.bandwidth)
+		bandwidth_limit = parse_size(args.bandwidth)
 
 	if getattr(args, "root", None):
 		root_dir = args.root
@@ -159,37 +139,10 @@ class Stall:
 
 def subdir(key):
 	path = os.path.join(root_dir, key)
-	core.mkdir(path)
+	fops.mkdir(path)
 	return path
-
-
-def list_bv(path):
-	bv_list = []
-	for f in os.listdir(path):
-		if core.bvid_pattern.fullmatch(f):
-			bv_list.append(f)
-
-	return bv_list
 
 
 def report(key, status, *args):
 	print(key[0].upper(), status, *args, flush = True)
 
-
-def find_images(table):
-	if type(table) is dict:
-		return find_images(table.values())
-
-	result = {}
-	for v in table:
-		if type(v) is dict:
-			result.update(find_images(v.values()))
-		elif type(v) is list:
-			result.update(find_images(v))
-		elif type(v) is str:
-			img_match = img_pattern.fullmatch(v)
-			if img_match:
-				key = img_match.group(1)
-				result[key] = v
-
-	return result

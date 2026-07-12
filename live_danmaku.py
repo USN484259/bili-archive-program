@@ -14,7 +14,8 @@ from base64 import b64encode
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import WebSocketException
 
-import core
+import fops
+import constants
 import runtime
 import network
 
@@ -92,7 +93,7 @@ class LiveDanmaku:
 				url = "wss://%s:%d/sub" % (host_info.get("host"), host_info.get("wss_port"))
 				await self.stall()
 				logger.info("connecting to live danmaku %s [%d/%d]", self.rid, index + 1, len(self.hosts))
-				self.conn = await ws_connect(url, user_agent_header = core.USER_AGENT["User-Agent"], ping_timeout = None)
+				self.conn = await ws_connect(url, user_agent_header = constants.USER_AGENT["User-Agent"], ping_timeout = None)
 				await self.send_verity()
 				return index
 			except Exception as e:
@@ -244,7 +245,7 @@ class DanmakuRelay:
 			logger.error("failed to close client %s: %s", client.name, str(e))
 
 	def __init__(self, sock_path):
-		self.sock = network.create_unix_socket(sock_path, mode = 0o666)
+		self.sock = fops.create_unix_socket(sock_path, mode = 0o666)
 		self.server = None
 		self.client_list = []
 

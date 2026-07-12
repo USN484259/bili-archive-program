@@ -8,10 +8,11 @@ import asyncio
 import logging
 import multiprocessing
 
-import core
+import fops
 import runtime
 import network
 import live_rec
+from utils import logger_init
 
 # constants
 
@@ -32,10 +33,10 @@ async def get_live_status(sess, uid_list):
 
 
 async def record_main(rid, path, rec_log, relay_path):
-	with core.locked_path(path) as rec_path:
+	with fops.locked_path(path) as rec_path:
 		if rec_log:
 			log_path = os.path.join(rec_path, "record.log")
-			runtime.logging_init(runtime.log_level - 10, log_path, no_stderr = True)
+			logger_init(runtime.log_level + 1, log_path, noprint = True)
 		async with network.session() as sess:
 			await live_rec.record(sess, rid, rec_path, relay_path = relay_path)
 
@@ -266,7 +267,7 @@ async def main(args):
 
 	if args.socket:
 		try:
-			sock = network.create_unix_socket(args.socket, mode = 0o666)
+			sock = fops.create_unix_socket(args.socket, mode = 0o666)
 			server = await asyncio.start_unix_server(on_connected, sock = sock, start_serving = True)
 		except Exception:
 			logger.exception("failed to create unix socket")

@@ -14,6 +14,7 @@ from urllib.parse import urlparse, unquote, parse_qs
 from contextlib import suppress
 from simple_fastcgi import AsyncFcgiServer, AsyncHttpResponseMixin, AsyncFcgiHandler
 
+from utils import get_relative_path, parse_size, logger_init
 
 # constants
 
@@ -129,7 +130,7 @@ class image_cache_handler(AsyncHttpResponseMixin, AsyncFcgiHandler):
 			if not cache_file:
 				return await self.send_response(404)
 
-			rel_path = self.get_relative_path(cache_file, doc_root)
+			rel_path = get_relative_path(cache_file, doc_root)
 			logger.debug(rel_path)
 			if not rel_path:
 				return await self.send_response(404)
@@ -140,25 +141,13 @@ class image_cache_handler(AsyncHttpResponseMixin, AsyncFcgiHandler):
 			logger.exception("error in handle request")
 			return await self.send_response(500)
 
-	@staticmethod
-	def get_relative_path(path, doc_root):
-		common_path = os.path.commonpath((path, doc_root))
-		logger.debug("%s\t%s", common_path, doc_root)
-		if common_path != doc_root:
-			return None
-
-		rel_path = os.path.relpath(path, doc_root)
-		if ".." in rel_path:
-			return None
-
-		return rel_path
 
 # entrance
 
 async def main(args):
 	max_size = None
 	if args.max_size:
-		max_size = constants.number_with_unit(args.max_size)
+		max_size = parse_size(args.max_size)
 
 	logger.info("image_cache at %s, max_size %s", args.path, str(max_size))
 	image_root = os.path.realpath(args.path)
@@ -169,11 +158,11 @@ async def main(args):
 
 
 if __name__ == "__main__":
-	logging.basicConfig(level = logging.DEBUG, format = constants.LOG_FORMAT, stream = sys.stderr)
-
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--path", required = True)
+	parser.add_argument("-v", "--verbose", action = "count", default = 0)
 	parser.add_argument("--max-size")
 
 	args = parser.parse_args()
+	logger_init(args.verbose)
 	asyncio.run(main(args))

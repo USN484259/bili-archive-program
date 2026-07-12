@@ -16,9 +16,7 @@ from threading import Thread
 from contextlib import suppress
 
 # project library
-import core
 import runtime
-import network
 from live_danmaku import LiveDanmaku
 
 # static objects

@@ -115,7 +115,7 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 
 目前平台不兼容性主要来自以下方面
 + `multiprocessing` 创建子进程时使用`fork`方式，部分代码依赖`fork(2)`的行为
-+ `core.locked_path` 使用 `flock(2)` 锁定文件
++ `fops.locked_path` 使用 `flock(2)` 锁定文件
 + 使用 `AF_UNIX` 套接字进行本地通信
 + 使用 `signal(7)` 信号触发特定操作或中断系统调用
 + 使用平台特定API如 `inotify(7)` `timerfd_create(2)` `eventfd(2)`
@@ -171,7 +171,7 @@ cd /srv/http/fcgi
 pip3 install --target /srv/http/fcgi --no-compile --no-deps simple-fastcgi simple-inotify
 # httpx, websockets, brotil 也可通过pip3安装
 # pip3 install --target /srv/http/fcgi --no-compile httpx websockets brotli
-for f in constants.py core.py runtime.py network.py verify.py video.py
+for f in constants.py fops.py runtime.py utils.py network.py verify.py video.py
 do
 	ln -s ../code/$f
 done

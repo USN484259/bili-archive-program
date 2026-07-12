@@ -6,7 +6,7 @@ import json
 import asyncio
 import logging
 
-import core
+import fops
 import runtime
 import network
 # import video
@@ -38,7 +38,7 @@ async def get_favlist_page(sess, mid, page):
 def save_favlist(favlist, path):
 	mid = favlist.get("info").get("id")
 	file_name = os.path.join(path, "%d.json" % mid)
-	with core.staged_file(file_name, "w", rotate = True) as f:
+	with fops.staged_file(file_name, "w", rotate = True) as f:
 		json.dump(favlist, f, indent = '\t', ensure_ascii = False)
 
 

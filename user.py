@@ -7,9 +7,10 @@ import asyncio
 import logging
 from collections import ChainMap
 
-import core
+import fops
 import runtime
 import network
+from utils import find_images
 from video_collection import fetch_user_collections, gather_bvid_from_collectons
 
 # constants
@@ -74,7 +75,7 @@ async def fetch_users(sess, uid_list, stall = None):
 
 
 async def fetch_images(img_fetch, info, path):
-	img_table = runtime.find_images(info)
+	img_table = find_images(info)
 	logger.info("fetching %d images", len(img_table))
 	for name, url in img_table.items():
 		await img_fetch.schedule(path, name, url)
@@ -97,7 +98,7 @@ async def main(args):
 		for uid, info in user_map.items():
 			fetch_status = False
 			try:
-				with core.locked_path(user_root, uid) as uid_path:
+				with fops.locked_path(user_root, uid) as uid_path:
 					await fetch_images(img_fetch, info, uid_path)
 
 					logger.info("fetching collections of user %s", uid)
@@ -112,10 +113,10 @@ async def main(args):
 
 					info_path = os.path.join(uid_path, "info.json")
 					logger.info("saving user %s", uid)
-					with core.staged_file(info_path, "w", rotate = True) as f:
+					with fops.staged_file(info_path, "w", rotate = True) as f:
 						json.dump(info, f, indent = '\t', ensure_ascii = False)
 
-					img_table = runtime.find_images(info)
+					img_table = find_images(info)
 					logger.info("user %s, images %d", uid, len(img_table))
 					for name, url in img_table.items():
 						await img_fetch.schedule(uid_path, name, url)

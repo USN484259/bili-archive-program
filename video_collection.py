@@ -2,8 +2,6 @@
 
 import logging
 
-import core
-import runtime
 import network
 
 # constants

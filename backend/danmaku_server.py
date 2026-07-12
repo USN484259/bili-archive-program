@@ -8,13 +8,13 @@ import socket
 import socketserver
 import argparse
 
-import constants
+from constants import default_names
 
 class danmaku_handler(socketserver.BaseRequestHandler):
 	def handle(self):
 		self.request.settimeout(5)
 		rid = int(self.request.recv(0x100).decode())
-		sock_path = os.path.join(self.server.danmaku_root, str(rid), constants.default_names.danmaku_socket)
+		sock_path = os.path.join(self.server.danmaku_root, str(rid), default_names.danmaku_socket)
 		danmaku_sock = None
 		pipes = None
 

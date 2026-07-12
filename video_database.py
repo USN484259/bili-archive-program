@@ -15,6 +15,7 @@ from contextlib import suppress
 from collections import defaultdict
 
 import constants
+from utils import logger_init
 
 # constants
 
@@ -627,11 +628,12 @@ def main(args):
 
 
 if __name__ == "__main__":
-	logging.basicConfig(level = logging.DEBUG, format = constants.LOG_FORMAT, stream = sys.stderr)
 
 	parser = argparse.ArgumentParser()
 	parser.add_argument("-d", "--dir", required = True)
+	parser.add_argument("-v", "--verbose", action = "count", default = 0)
 	parser.add_argument("database")
 
 	args = parser.parse_args()
+	logger_init(args.verbose)
 	main(args)

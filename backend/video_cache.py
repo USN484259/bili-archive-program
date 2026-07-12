@@ -15,6 +15,8 @@ from urllib.parse import parse_qs
 from contextlib import suppress
 from simple_fastcgi import FcgiServer, HttpResponseMixin, FcgiHandler
 
+from utils import logger_init
+
 # constants
 
 import constants
@@ -27,7 +29,6 @@ multiprocessing = multiprocessing.get_context("fork")
 # helper functions
 
 def exec_download(video_root, bvid, pipe, arg_list, extra_args):
-	import core
 	import runtime
 	import network
 	import video
@@ -281,15 +282,15 @@ class BVPlayServer(FcgiServer):
 # entrance
 
 if __name__ == "__main__":
-	logging.basicConfig(level = logging.INFO, format = constants.LOG_FORMAT, stream = sys.stderr)
-
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--path", required = True)
 	parser.add_argument("--database")
 	parser.add_argument("--max-duration", type = int)
+	parser.add_argument("-v", "--verbose", action = "count", default = 0)
 	parser.add_argument("args", nargs = '*')
 
 	args = parser.parse_args()
+	logger_init(args.verbose)
 
 	logger.info("cache at %s, database %s, max_duration %s", args.path, str(args.database), str(args.max_duration))
 	cache_path = os.path.realpath(args.path)

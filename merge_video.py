@@ -5,10 +5,10 @@ import sys
 import shutil
 import logging
 
-import core
 import runtime
 import verify
 
+from utils import list_bv
 
 logger = logging.getLogger("bili_arch.merge_video")
 
@@ -45,7 +45,7 @@ def main(args):
 	if args.inputs:
 		bv_list = args.inputs
 	else:
-		bv_list = runtime.list_bv(src_root)
+		bv_list = list_bv(src_root)
 
 	logger.info("merging %d videos from %s to %s", len(bv_list), src_root, dst_root)
 	for bvid in bv_list:

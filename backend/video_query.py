@@ -9,7 +9,7 @@ import logging
 from urllib.parse import urlparse, parse_qs
 from collections import OrderedDict
 
-
+from utils import logger_init
 from video_database import VideoDatabase
 from simple_fastcgi import FcgiServer, HttpResponseMixin, FcgiHandler
 
@@ -103,7 +103,7 @@ class VideoServer(FcgiServer):
 # entrance
 
 if __name__ == "__main__":
-	logging.basicConfig(level = logging.DEBUG, format = constants.LOG_FORMAT, stream = sys.stderr)
+	logger_init()
 
 	with VideoServer(QueryHandler) as server:
 		server.serve_forever(poll_interval = 10)

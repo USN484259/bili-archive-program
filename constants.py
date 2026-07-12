@@ -3,15 +3,6 @@
 import re
 import collections
 
-UNIT_TABLE = {
-	'k': 1000,
-	'ki': 0x400,
-	'm': 1000 * 1000,
-	'mi': 0x100000,
-	'g': 1000 * 1000 * 1000,
-	'gi': 0x40000000,
-}
-
 DEFAULT_NAME_MAP = {
 	"danmaku": "danmaku.xml",
 	"tmp_ext": ".tmp",
@@ -33,10 +24,6 @@ USER_AGENT = {
 
 # https://github.com/SocialSisterYi/bilibili-API-collect/blob/master/docs/misc/bvid_desc.md
 bvid_pattern = re.compile(r"(BV1[1-9A-HJ-NP-Za-km-z]{9})")
-unit_pattern = re.compile(r"(\d+)([kKmMgG][Ii]?)?[Bb]?")
 
 default_names = collections.namedtuple("DefaultName", DEFAULT_NAME_MAP.keys())(**DEFAULT_NAME_MAP)
 
-def number_with_unit(num_str):
-	match = unit_pattern.fullmatch(num_str)
-	return int(match.group(1)) * UNIT_TABLE.get(match.group(2).lower(), 1)

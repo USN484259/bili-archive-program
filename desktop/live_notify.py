@@ -19,6 +19,8 @@ import gi
 gi.require_version('Notify', '0.7')
 from gi.repository import Notify, GLib
 
+from utils import logging_init
+
 # constants
 
 import constants
@@ -60,7 +62,7 @@ def load_config(config_path):
 def fetch_icon(sess, url):
 	icon_file = tempfile.NamedTemporaryFile()
 	logger.info("fetching icon into %s", icon_file.name)
-	with sess.stream("GET", url, headers = constants.USER_AGENT) as resp:
+	with sess.stream("GET", url) as resp:
 		logger.debug(resp)
 		resp.raise_for_status()
 		for chunk in resp.iter_bytes():
@@ -242,7 +244,7 @@ def main(args):
 
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser()
-	parser.add_argument("-v", "--verbose", action = "store_true")
+	parser.add_argument("-v", "--verbose", action = "count", default = 0)
 	parser.add_argument("--name", default = os.path.basename(sys.argv[0]))
 	parser.add_argument("--interval", type = int, default = 30)
 	parser.add_argument("--monitor-url")
@@ -250,6 +252,5 @@ if __name__ == "__main__":
 	parser.add_argument("config", nargs = '?')
 
 	args = parser.parse_args()
-	logging.basicConfig(level = args.verbose and logging.DEBUG or logging.INFO, format = constants.LOG_FORMAT, stream = sys.stderr)
-
+	logger_init(args.verbose)
 	main(args)

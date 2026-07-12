@@ -8,10 +8,12 @@ import asyncio
 import logging
 import collections
 
-import core
+from constants import default_names, bvid_pattern
+import fops
 import runtime
 import network
 import verify
+from utils import list_bv
 
 # constants
 
@@ -68,7 +70,7 @@ def save_interactive(iv_info, path):
 
 def save_info(info, bv_root):
 	file_path = os.path.join(bv_root, "info.json")
-	with core.staged_file(file_path, "w", rotate = True) as f:
+	with fops.staged_file(file_path, "w", rotate = True) as f:
 		json.dump(info, f, indent = '\t', ensure_ascii = False)
 
 
@@ -196,7 +198,7 @@ async def fetch_part(sess, bvid, cid, path, force, /, stall = None, *, request =
 			continue
 
 		if not url_list:
-			core.touch(file_path)
+			fops.touch(file_path)
 			continue
 
 		for url in url_list:
@@ -213,9 +215,9 @@ async def fetch_part(sess, bvid, cid, path, force, /, stall = None, *, request =
 		raise exception
 
 	if 'V' in request and 'V' not in components:
-		core.touch(os.path.join(path, core.default_names.novideo))
+		fops.touch(os.path.join(path, default_names.novideo))
 	if 'A' in request and 'A' not in components:
-		core.touch(os.path.join(path, core.default_names.noaudio))
+		fops.touch(os.path.join(path, default_names.noaudio))
 
 
 async def fetch_cover(sess, info, path, force, stall = None):
@@ -250,7 +252,7 @@ async def fetch_subtitle(sess, info, cid, path, force, stall = None):
 
 
 async def do_fix(sess, bv, path, /, stall = None, ignore = None, max_duration = None, **kwargs):
-	with core.locked_path(path, bv) as bv_root:
+	with fops.locked_path(path, bv) as bv_root:
 		info = None
 		exception = None
 		fetched_info = False
@@ -307,7 +309,7 @@ async def do_fix(sess, bv, path, /, stall = None, ignore = None, max_duration = 
 				raise Exception("duration exceeds limit: %d/%d" % (video_duration, max_duration))
 
 		for cid, part_stat in stat.get("parts").items():
-			with core.locked_path(bv_root, cid) as part_root:
+			with fops.locked_path(bv_root, cid) as part_root:
 				logger.info("%s %s", part_root, cid + str(part_stat))
 				request = ""
 				if not part_stat.get('V', True):
@@ -346,7 +348,7 @@ async def do_update(sess, bv, path, force, /, stall = None, ignore = None, max_d
 	exception = None
 
 	ignore = ignore or ""
-	with core.locked_path(path, bv) as bv_root:
+	with fops.locked_path(path, bv) as bv_root:
 		save_info(info, bv_root)
 
 		try:
@@ -375,7 +377,7 @@ async def do_update(sess, bv, path, force, /, stall = None, ignore = None, max_d
 		for part in part_list:
 			cid = str(part.get("cid", ""))
 			logger.info("downloading %s, %s", cid, part.get("part", None) or part.get("title", ""))
-			with core.locked_path(bv_root, cid) as part_root:
+			with fops.locked_path(bv_root, cid) as part_root:
 
 				try:
 					request = ""
@@ -424,7 +426,7 @@ async def batch_download(sess, bv_list, video_root, mode, **kwargs):
 	for bv in bv_list:
 		fetch_status = False
 		try:
-			assert(core.bvid_pattern.fullmatch(bv))
+			assert(bvid_pattern.fullmatch(bv))
 			await download(sess, bv, video_root, mode, stall, **kwargs)
 			fetched_video += 1
 			fetch_status = True
@@ -444,7 +446,7 @@ async def main(args):
 		bv_list = args.inputs
 	else:
 		logger.debug("scan BV in %s", args.dir or "(cwd)")
-		bv_list = runtime.list_bv(args.dir)
+		bv_list = list_bv(args.dir)
 
 	logger.info("BV count %d, mode %s", len(bv_list), args.mode)
 	logger.debug(bv_list)

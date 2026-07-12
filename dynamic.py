@@ -6,10 +6,11 @@ import json
 import asyncio
 import logging
 
-import core
+import fops
 import runtime
 import network
 
+from utils import find_images
 
 # constants
 
@@ -90,13 +91,13 @@ async def main(args):
 							logger.exception("failed to fetch dynamic detail %s", str(oid))
 
 					try:
-						with core.locked_path(user_root, uid, oid) as dyn_path:
+						with fops.locked_path(user_root, uid, oid) as dyn_path:
 							info_path = os.path.join(dyn_path, "info.json")
 							logger.info("saving dynamic %s", oid)
-							with core.staged_file(info_path, "w", rotate = True) as f:
+							with fops.staged_file(info_path, "w", rotate = True) as f:
 								json.dump(dyn, f, indent = '\t', ensure_ascii = False)
 
-							img_table = runtime.find_images(dyn)
+							img_table = find_images(dyn)
 							logger.info("dynamic %s, images %d", oid, len(img_table))
 							for name, url in img_table.items():
 								await img_fetch.schedule(dyn_path, name, url)

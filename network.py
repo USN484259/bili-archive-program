@@ -14,9 +14,9 @@ import hashlib
 from contextlib import suppress
 from urllib.parse import urlencode
 
-import core
-import runtime
 import constants
+import fops
+import runtime
 
 # constants
 
@@ -101,7 +101,7 @@ def session(credential = None):
 	for k, v in credential.items():
 		cookies.set(k, v, domain = BILI_DOMAIN)
 
-	return httpx.AsyncClient(headers = core.USER_AGENT, timeout = timeout, cookies = cookies, follow_redirects = True)
+	return httpx.AsyncClient(headers = constants.USER_AGENT, timeout = timeout, cookies = cookies, follow_redirects = True)
 
 
 async def check_credential(sess):
@@ -157,7 +157,7 @@ async def fetch(sess, url, path, **kwargs):
 		else:
 			logger.warning("missing content-length")
 
-		with core.staged_file(path, "wb", **kwargs) as f:
+		with fops.staged_file(path, "wb", **kwargs) as f:
 			last_timestamp = None
 			if runtime.bandwidth_limit:
 				logger.debug("bandwidth limit %d B/s", runtime.bandwidth_limit)
@@ -209,22 +209,6 @@ async def fetch_stream(sess, url, sink_func = None, *args):
 		if sink_func and (sink is not None):
 			logger.debug("closing sink")
 			sink.close()
-
-
-def create_unix_socket(path, *, mode = 0o600):
-	logger.debug("creating unix socket %s", path)
-	# https://stackoverflow.com/questions/11781134/change-linux-socket-file-permissions
-	sock = socket.socket(socket.AF_UNIX)
-	try:
-		os.fchmod(sock.fileno(), 0o600)
-		with suppress(FileNotFoundError):
-			os.unlink(path)
-		sock.bind(path)
-		os.chmod(path, mode)
-		return sock
-	except:
-		sock.close()
-		raise
 
 
 class image_fetcher:
