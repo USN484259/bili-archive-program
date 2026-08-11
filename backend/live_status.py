@@ -5,54 +5,93 @@ import sys
 sys.path[0] = os.getcwd()
 
 import time
-import socket
+import asyncio
+import logging
 import argparse
+
+import constants
 from contextlib import suppress
-from simple_fastcgi import FcgiServer, HttpResponseMixin, FcgiHandler
+from utils import logger_init
+from simple_fastcgi import AsyncFcgiServer, AsyncHttpResponseMixin, AsyncFcgiHandler
+from messaging import MessagingClient
 
-class live_status_handler(HttpResponseMixin, FcgiHandler):
-	def handle(self):
+logger = logging.getLogger("bili_arch.live_status")
+
+class live_status_handler(AsyncHttpResponseMixin, AsyncFcgiHandler):
+	async def handle(self):
 		try:
-			timestamp = time.monotonic()
-			if self.server.timestamp and timestamp - self.server.timestamp < self.server.interval:
-				return self.send_response(200, "application/json", self.server.cached_result)
-
-			self.server.timestamp = timestamp
-
-			conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-			data = bytes()
-			try:
-				conn.connect(self.server.socket_path)
-				while True:
-					chunk = conn.recv(0x1000)
-					if not chunk:
-						break
-					data += chunk
-			finally:
-				conn.close()
-
-			self.server.cached_result = data
-			return self.send_response(200, "application/json", data)
-		except Exception as e:
-			print(str(e), file = sys.stderr)
-			return self.send_response(500)
+			result = await self.server.get()
+			return await self.send_response(200, json = result)
+		except Exception:
+			logger.exception("exception in handle")
+			return await self.send_response(500)
 
 
-class LiveStatusServer(FcgiServer):
-	def __init__(self, handler, socket_path, interval):
+class LiveStatusServer(AsyncFcgiServer):
+	def __init__(self, handler, msg_addr, interval):
 		if interval <= 0:
 			raise ValueError("invalid interval " + str(interval))
-		FcgiServer.__init__(self, handler)
-		self.socket_path = socket_path
+		super().__init__(handler)
+		self.msg_client = MessagingClient(msg_addr, allow_dummy = False)
 		self.interval = interval
-		self.timestamp = None
+		self.cond = asyncio.Condition()
+		self.req_timestamp = 0
+		self.resp_timestamp = 0
 		self.cached_result = {}
+
+		asyncio.get_running_loop().add_reader(self.msg_client.fileno(), self.handle_message)
+
+	async def get(self):
+		cur_time = time.time()
+		async with self.cond:
+			if cur_time - self.resp_timestamp < self.interval:
+				return self.cached_result
+
+			if cur_time - self.req_timestamp >= self.interval:
+				self.msg_client.send(constants.topic.live_status, json = {
+					"timestamp":	cur_time,
+					"action":	"get-live-status"
+				})
+				self.req_timestamp = cur_time
+
+			try:
+				await asyncio.wait_for(self.cond.wait(), timeout = self.interval)
+			except asyncio.TimeoutError:
+				logger.warning("timeout waiting for live-status")
+
+			return self.cached_result
+
+	async def set_result(self, resp):
+		async with self.cond:
+			self.resp_timestamp = time.time()
+			self.cached_result = resp.get("live-status", {})
+			self.cond.notify_all()
+
+	def handle_message(self):
+		try:
+			if not self.msg_client.wait(0):
+				return
+			while True:
+				topic, resp = self.msg_client.recv(constants.topic.live_status)
+				if not topic:
+					return
+				if not isinstance(resp, dict):
+					continue
+				asyncio.get_running_loop().create_task(self.set_result(resp))
+
+		except Exception:
+			logger.exception("exception in handle_message")
+
+
+async def main(args):
+	async with LiveStatusServer(live_status_handler, args.msg_addr, args.status_interval) as server:
+		await server.serve_forever()
 
 
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser()
-	parser.add_argument("--status-interval", type = int, default = 2)
-	parser.add_argument("--status-socket")
+	parser.add_argument("--status-interval", type = int, default = 5)
+	parser.add_argument("--msg-addr")
 	parser.add_argument("--danmaku-root")
 	parser.add_argument("--danmaku-socket")
 
@@ -78,5 +117,5 @@ if __name__ == "__main__":
 		else:
 			os.waitpid(pid, os.WNOHANG)
 
-	with LiveStatusServer(live_status_handler, args.status_socket, args.status_interval) as server:
-		server.serve_forever(poll_interval = 600)
+	logger_init()
+	asyncio.run(main(args))

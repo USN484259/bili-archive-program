@@ -1,0 +1,12 @@
+[Unit]
+Description=bili-arch messaging server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/http/code
+ExecStart=/usr/bin/python3 messaging.py -v /srv/http/tmp/messaging.socket
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

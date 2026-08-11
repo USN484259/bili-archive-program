@@ -47,6 +47,9 @@ standard_args = {
 		(("--prefer",), {}),
 		(("--reject",), {}),
 	],
+	"messaging": [
+		(("--msg-addr",), {}),
+	],
 }
 
 # helper functions

@@ -16,6 +16,7 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 + verify.py		验证本地视频完整性
 + live_rec.py		直播录制，支持FLV/HLS直播流，支持录制弹幕，转发弹幕数据
 + monitor.py		直播间批量监控和录制
++ messaging.py		消息传递服务，用于模块间的通信
 + video_database.py	将视频信息缓存进SQLite数据库
 + database_daemon.py	监视视频目录并自动更新数据库
 + merge_video.py	将缓存的视频合并进主视频存储中
@@ -67,29 +68,30 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 
 ### 工具模块
 
-|	项目			|	OS	|	Python		|	httpx		|	ffprobe		|	websockets	|	brotli	|	simple_inotify	|	psutil	|
-|	----			|	----	|	----		|	----		|	----		|	----		|	----	|	----		|	----	|
-|	video.py		|	UNIX	|	3.8+		|	M		|			|			|		|			|		|
-|	favlist.py		|	UNIX	|	3.8+		|	M		|			|			|		|			|		|
-|	user.py			|	UNIX	|	3.8+		|	M		|			|			|		|			|		|
-|	verify.py		|	any	|	3.8+		|			|	O		|			|		|			|		|
-|	live_rec.py		|	UNIX	|	3.8+		|	M		|			|	O		|	O	|			|		|
-|	monitor.py		|	UNIX	|	3.8+		|	M		|			|			|		|			|		|
-|	video_database.py	|	any	|	3.8+		|			|			|			|		|			|		|
-|	database_daemon.py	|	Linux	|	3.8+		|			|			|			|		|	M		|	O	|
-|	merge_video.py		|	any	|	3.8+		|			|			|			|		|			|		|
+|	项目			|	OS	|	Python		|	httpx		|	ffprobe		|	websockets	|	brotli	|	simple_inotify	|	psutil	|	messaging.py	|
+|	----			|	----	|	----		|	----		|	----		|	----		|	----	|	----		|	----	|	----		|
+|	video.py		|	UNIX	|	3.8+		|	M		|			|			|		|			|		|			|
+|	favlist.py		|	UNIX	|	3.8+		|	M		|			|			|		|			|		|			|
+|	user.py			|	UNIX	|	3.8+		|	M		|			|			|		|			|		|			|
+|	verify.py		|	any	|	3.8+		|			|	O		|			|		|			|		|			|
+|	live_rec.py		|	UNIX	|	3.8+		|	M		|			|	O		|	O	|			|		|			|
+|	monitor.py		|	UNIX	|	3.8+		|	M		|			|			|		|			|		|	O		|
+|	messaging.py		|	Linux	|	3.8+		|			|			|			|		|			|		|			|
+|	video_database.py	|	any	|	3.8+		|			|			|			|		|			|		|			|
+|	database_daemon.py	|	Linux	|	3.8+		|			|			|			|		|	M		|	O	|			|
+|	merge_video.py		|	any	|	3.8+		|			|			|			|		|			|		|			|
 
 ### http后端
 
-|	项目		|	OS	|	Python		|	simple-fastcgi	|	httpx		|
-|	----		|	----	|	----		|	----		|	----		|
-|	dir_listing.py	|	any	|	3.8+		|	M		|			|
-|	zip_access.py	|	any	|	3.8+		|	M		|			|
-|	video_cache.py	|	UNIX	|	3.8+		|	M		|	M		|
-|	live_status.py	|	UNIX	|	3.8+		|	M		|	M		|
-|	bili_proxy.py	|	any	|	3.8+		|	M		|	M		|
-|	image_cache.py	|	UNIX	|	3.8+		|	M		|	M		|
-|	video_query.py	|	any	|	3.8+		|	M		|			|
+|	项目		|	OS	|	Python		|	simple-fastcgi	|	httpx		|	messaging.py	|
+|	----		|	----	|	----		|	----		|	----		|	----		|
+|	dir_listing.py	|	any	|	3.8+		|	M		|			|			|
+|	zip_access.py	|	any	|	3.8+		|	M		|			|			|
+|	video_cache.py	|	UNIX	|	3.8+		|	M		|	M		|			|
+|	live_status.py	|	Linux	|	3.8+		|	M		|	M		|	M		|
+|	bili_proxy.py	|	any	|	3.8+		|	M		|	M		|			|
+|	image_cache.py	|	UNIX	|	3.8+		|	M		|	M		|			|
+|	video_query.py	|	any	|	3.8+		|	M		|			|			|
 
 ### http前端
 
@@ -111,26 +113,43 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 |	live_notify.py		|	Linux	|	3.8+		|	M		|	M		|			|		|
 |	danmaku_reaction.py	|	Windows	|	3.11+		|	M		|			|	M		|	M	|
 
+### 关于消息传递服务
++ messaging.py 封装了模块间通信的功能。该文件直接运行时作为消息服务器，被其他库包含时提供消息传递接口
++ 由于目前的实现使用了Linux平台特定的功能，因此模块间消息传递只可在Linux环境下正常运作
++ 在非Linux平台上，若 messaging.py 为可选依赖，仅消息传递无法工作，其他功能不受影响
+
 ### 移植提示
 
 目前平台不兼容性主要来自以下方面
 + `multiprocessing` 创建子进程时使用`fork`方式，部分代码依赖`fork(2)`的行为
 + `fops.locked_path` 使用 `flock(2)` 锁定文件
-+ 使用 `AF_UNIX` 套接字进行本地通信
++ 使用 `AF_UNIX` `SOCK_SEQPACKET` 进行本地通信
 + 使用 `signal(7)` 信号触发特定操作或中断系统调用
-+ 使用平台特定API如 `inotify(7)` `timerfd_create(2)` `eventfd(2)`
-+ 部署方案中使用了 *symbolic link*, *tmpfs*, *bind mount*
++ 使用平台特定API如 `inotify(7)` `epoll(7)` `timerfd_create(2)` `eventfd(2)`
++ 部署方案依赖`systemd`，使用了 *symbolic link*, *tmpfs*, *bind mount*
 
 
 ## 参考部署
 
+### 消息服务
+
+```sh
+mkdir -p $HOME/.config/systemd/user/
+cp config/bili-arch-messaging.service $HOME/.config/systemd/user/
+sudo loginctl enable-linger 1000	# your uid
+systemctl --user daemon-reload
+systemctl --user enable --now bili-arch-messaging.service
+```
+
 ### 直播录制
 
 ```sh
-# 使用`cron(8)`开机启动，在tmux session中启动直播间录制
-$ crontab -l
-SHELL=/bin/bash
-@reboot tmux new-session -d -s bili -c /PATH/TO/RECORDING/DIR "./monitor.py -v --rec-log -u bili-credential.txt -r bili-arch -i 20 --relay-root /srv/http/tmp/live/ --socket /srv/http/tmp/bili-monitor.socket rec_config.json"
+mkdir -p $HOME/.config/systemd/user/
+cp config/bili-arch-monitor.service $HOME/.config/systemd/user/
+vim $HOME/.config/systemd/user/bili-arch-monitor.service	# 修改相关路径
+sudo loginctl enable-linger 1000	# your uid
+systemctl --user daemon-reload
+systemctl --user enable --now bili-arch-monitor.service
 ```
 
 ### http 服务
@@ -171,7 +190,7 @@ cd /srv/http/fcgi
 pip3 install --target /srv/http/fcgi --no-compile --no-deps simple-fastcgi simple-inotify
 # httpx, websockets, brotil 也可通过pip3安装
 # pip3 install --target /srv/http/fcgi --no-compile httpx websockets brotli
-for f in constants.py fops.py runtime.py utils.py network.py verify.py video.py
+for f in constants.py fops.py runtime.py utils.py network.py messaging.py verify.py video.py
 do
 	ln -s ../code/$f
 done

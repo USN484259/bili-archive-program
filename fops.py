@@ -154,10 +154,10 @@ class locked_path(os.PathLike):
 			self.fd = None
 
 
-def create_unix_socket(path, *, mode = 0o600):
+def create_unix_socket(path, *, sock_type = socket.SOCK_STREAM, mode = 0o600):
 	logger.debug("creating unix socket %s", path)
 	# https://stackoverflow.com/questions/11781134/change-linux-socket-file-permissions
-	sock = socket.socket(socket.AF_UNIX)
+	sock = socket.socket(socket.AF_UNIX, sock_type)
 	try:
 		os.fchmod(sock.fileno(), 0o600)
 		with suppress(FileNotFoundError):

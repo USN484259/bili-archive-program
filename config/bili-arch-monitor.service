@@ -1,0 +1,14 @@
+[Unit]
+Description=bili-arch live monitor service
+After=bili-arch-messaging.service
+# Requires=bili-arch-messaging.service
+
+[Service]
+Type=simple
+Environment=BILI_ARCH_MSG_ADDR=/srv/http/tmp/messaging.socket
+WorkingDirectory=/srv/http/code
+ExecStart=/usr/bin/python3 monitor.py -v --rec-log -u bili-credential.txt -r /PATH/TO/bili-arch -i 20 --relay-root /srv/http/tmp/live/ config/rec_config.json
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
