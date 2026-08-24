@@ -19,12 +19,12 @@ import gi
 gi.require_version('Notify', '0.7')
 from gi.repository import Notify, GLib
 
-from utils import logging_init
+from utils import logger_init
+from messaging import MessagingClient
 
 # constants
 
 import constants
-
 LIVE_STATUS_URL = "https://api.live.bilibili.com/room/v1/Room/get_status_info_by_uids"
 
 # static objects
@@ -50,13 +50,6 @@ def exec_restart():
 
 	logger.debug(argv)
 	os.execv(exec_path, argv)
-
-
-def load_config(config_path):
-	with open(config_path, "r") as f:
-		config = json.load(f)
-
-	return [u["uid"] for u in config]
 
 
 def fetch_icon(sess, url):
@@ -97,34 +90,6 @@ def on_click(notification, action, rid):
 	webbrowser.open("https://live.bilibili.com/" + str(rid), new = 1, autoraise = False)
 
 
-def show_notification(info, icon_file, active_notifies):
-	uname = info.get("uname", "")
-
-	def on_close(notification):
-		logger.info("remove notification for %s", uname)
-		icon_file = active_notifies.pop(notification, None)
-		icon_file.close()
-
-	logger.info("create notification for %s", uname)
-	notification = Notify.Notification.new(
-		uname + " 开播了",
-		live_time_str(info.get("live_time")) + '\t' + info.get("title", ""),
-		icon_file.name
-	)
-
-	notification.add_action(
-		"default",
-		"看看你的",
-		on_click,
-		info.get("room_id")
-	)
-	notification.connect("closed", on_close)
-	notification.show()
-	active_notifies[notification] = icon_file
-
-
-# methods
-
 def fetch_status_bili(sess, uid_list):
 	if not uid_list:
 		return {}
@@ -146,100 +111,189 @@ def fetch_status_http(sess, url):
 	resp = sess.request("GET", url)
 	resp.raise_for_status()
 	return resp.json()
-	# logger.debug(live_status)
 
 
-def fetch_status_sock(sess, path):
-	with socket.socket(socket.AF_UNIX) as f:
-		f.connect(path)
-		data = f.recv(0x1000)
-		return json.loads(data.decode())
+# main class
+
+class LiveStatusHandler:
+	def __init__(self, args):
+		self.sess = httpx.Client(headers = constants.USER_AGENT, timeout = min(10, args.interval / 2), follow_redirects = True)
+		self.config_path = args.config
+		self.url = args.url
+		self.interval = args.interval
+		self.msg_client = None
+		self.live_status = {}
+		self.active_notifies = {}
+		self.timestamp = None
+		self.uid_list = None
+
+		if args.url or args.msg_addr:
+			pass
+		elif not args.config:
+			raise RuntimeError("at least url, msg-addr or config should be specified")
+
+		self.reload_config()
+		if args.msg_addr:
+			self.msg_client = MessagingClient(args.msg_addr, allow_dummy = False)
+			self.msg_client.subscribe(constants.topic.live_status)
+			self.msg_watch_id = GLib.io_add_watch(self.msg_client.fileno(), GLib.IO_IN, self.handle_message)
 
 
-def check_live_status(sess, rec, live_status):
-	for uid, info in live_status.items():
-			status = info.get("live_status")
-			last_status = rec["status_rec"].get(uid, {}).get("live_status")
-			logger.debug("uid %s status %d", str(uid), status)
-			if status != 1:
-				continue
-			if last_status and last_status == 1:
-				continue
-
-			logger.info("new live room %s: %s", info.get("uname", ""), info.get("title", ""))
-			icon_file = fetch_icon(sess, info.get("face"))
-			show_notification(info, icon_file, rec["active_notifies"])
-
-	rec["status_rec"] = live_status
-
-
-# entrance
-
-def main(args):
-	uid_list = []
-
-	if args.config:
-		uid_list = load_config(args.config)
-	elif args.monitor_url or args.monitor_sock:
-		pass
-	else:
-		raise RuntimeError("at least monitor-url, monitor-sock or config should be specified")
-
-	Notify.init(args.name)
-	rec = {
-		"status_rec": {},
-		"active_notifies": {},
-	}
-	sess = httpx.Client(headers = constants.USER_AGENT, timeout = min(10, args.interval / 2), follow_redirects = True)
-
-	def sig_reload(signum, frame):
-		logger.info("reset live status")
-		rec["status_rec"] = {}
-		if args.config:
-			logger.info("reloading config")
+	def reload_config(self):
+		if self.config_path:
 			try:
-				uid_list = load_config(args.config)
+				with open(self.config_path, "r") as f:
+					config = json.load(f)
+
+				self.uid_list = [u["uid"] for u in config]
+				self.live_status = {}
+
 			except Exception:
-				logger.exception("failed to reload config")
+				logger.exception("failed to load config")
 
-	def sig_restart(signum, frame):
-		for icon_file in rec["active_notifies"].values():
+
+	def close(self):
+		for icon_file in self.active_notifies.values():
 			icon_file.close()
-		exec_restart()
+		self.active_notifies.clear()
+		if self.msg_client is not None:
+			try:
+				GLib.Source.remove(self.msg_watch_id)
+				self.msg_client.close()
+			finally:
+				self.msg_client = None
 
-	def on_timer():
+		if self.sess is not None:
+			try:
+				self.sess.close()
+			finally:
+				self.sess = None
+
+
+	def run(self, main_loop):
+		self.on_timer()
+		GLib.timeout_add_seconds(self.interval, self.on_timer)
+		main_loop.run()
+
+
+	def on_timer(self):
 		try:
 			logger.info("checking live status")
 			live_status = None
 			try:
-				if args.monitor_url:
-					live_status = fetch_status_http(sess, args.monitor_url)
-				elif args.monitor_sock:
-					live_status = fetch_status_sock(sess, args.monitor_sock)
+				if self.url:
+					live_status = fetch_status_http(self.sess, self.url)
+				elif self.msg_client:
+					cur_time = time.monotonic()
+					self.msg_client.send(constants.topic.live_status, json = {
+						"action":	"get-live-status",
+					})
+					if self.timestamp is None:
+						self.timestamp = 0
+						return
+					elif cur_time - self.timestamp < self.interval:
+						return
 			except Exception:
-				if not uid_list:
+				if not self.uid_list:
 					raise
 
-			if live_status is None and args.config:
-				live_status = fetch_status_bili(sess, uid_list)
+			if live_status is None and self.uid_list:
+				live_status = fetch_status_bili(self.sess, self.uid_list)
 
-
-			check_live_status(sess, rec, live_status)
+			self.check_live_status(live_status)
 		except Exception:
 			logger.exception("failed to update live status")
 
 		return True
 
-	signal.signal(signal.SIGUSR1, sig_reload)
-	signal.signal(signal.SIGUSR2, sig_restart)
+
+	def handle_message(self, *args):
+		try:
+			self.msg_client.wait(0)
+			while True:
+				topic, info = self.msg_client.recv(constants.topic.live_status)
+				if not topic:
+					break
+				logger.debug("received %s", topic)
+				if not isinstance(info, dict) or "live_status" not in info:
+					continue
+				self.timestamp = time.monotonic()
+				self.check_live_status(info.get("live_status"))
+		except Exception:
+			logger.exception("exception in handle_message")
+		return True
+
+
+	def check_live_status(self, live_status):
+		if not live_status:
+			return
+
+		for uid, info in live_status.items():
+				status = info.get("live_status")
+				last_status = self.live_status.get(uid, {}).get("live_status")
+				logger.debug("uid %s status %d", str(uid), status)
+				if status != 1:
+					continue
+				if last_status and last_status == 1:
+					continue
+
+				logger.info("new live room %s: %s", info.get("uname", ""), info.get("title", ""))
+				icon_file = fetch_icon(self.sess, info.get("face"))
+				self.show_notification(info, icon_file)
+
+		self.live_status = live_status
+
+
+	def show_notification(self, info, icon_file):
+		uname = info.get("uname", "")
+
+		def on_close(notification):
+			logger.info("remove notification for %s", uname)
+			icon_file = self.active_notifies.pop(notification, None)
+			if icon_file:
+				icon_file.close()
+
+		logger.info("create notification for %s", uname)
+		notification = Notify.Notification.new(
+			uname + " 开播了",
+			live_time_str(info.get("live_time")) + '\t' + info.get("title", ""),
+			icon_file.name
+		)
+
+		notification.add_action(
+			"default",
+			"看看你的",
+			on_click,
+			info.get("room_id")
+		)
+		notification.connect("closed", on_close)
+		notification.show()
+		self.active_notifies[notification] = icon_file
+
+
+def main(args):
+	Notify.init(args.name)
+	handler = LiveStatusHandler(args)
 	main_loop = GLib.MainLoop()
-	on_timer()
-	GLib.timeout_add_seconds(args.interval, on_timer)
+	need_restart = False
+
+	def sig_reload(signum, frame):
+		logger.info("reset live status")
+		handler.reload_config()
+
+
+	def sig_restart(signum, frame):
+		need_restart = True
+		main_loop.quit()
+
 	try:
-		main_loop.run()
+		signal.signal(signal.SIGUSR1, sig_reload)
+		signal.signal(signal.SIGUSR2, sig_restart)
+		handler.run(main_loop)
 	finally:
-		for icon_file in rec["active_notifies"].values():
-			icon_file.close()
+		handler.close()
+		if need_restart:
+			exec_restart()
 
 
 if __name__ == "__main__":
@@ -247,8 +301,8 @@ if __name__ == "__main__":
 	parser.add_argument("-v", "--verbose", action = "count", default = 0)
 	parser.add_argument("--name", default = os.path.basename(sys.argv[0]))
 	parser.add_argument("--interval", type = int, default = 30)
-	parser.add_argument("--monitor-url")
-	parser.add_argument("--monitor-sock")
+	parser.add_argument("--url")
+	parser.add_argument("--msg-addr")
 	parser.add_argument("config", nargs = '?')
 
 	args = parser.parse_args()

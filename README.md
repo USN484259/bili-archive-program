@@ -32,6 +32,7 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 |	--dir	|	-d	|	设置输出目录	|	覆盖 -r 选项	|
 |	--credential	|	-u	|	传入描述登录状态的credential文件	|	|
 |	--mode	|	-m	|	设置视频下载模式：fix, update, force	|	|
+|	--msg-addr	|	|	指定消息传递服务地址	|
 |	--ignore	|	|	忽略指定类型的内容，V 视频，A 音频，C 封面，D 弹幕，S 字幕，P 分P	|	|
 |	--prefer	|	|	优先选择指定的媒体类型	|	见下	|
 |	--reject	|	|	不选择指定的媒体类型	|	见下	|
@@ -64,22 +65,22 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 + M	必需依赖
 + O	可选依赖
 + UNIX 指 Linux, MacOS, BSD 等**非Windows**平台，理论上兼容Windows上的MinGW / WSL，目前仅在Linux平台上验证过
-+ http前端 理论上兼容所有现代浏览器，目前仅在Firefox上验证过
++ http前端 理论上兼容所有现代浏览器，目前仅在 *Firefox* 和 *Android WebView 83* 上验证过
 
 ### 工具模块
 
-|	项目			|	OS	|	Python		|	httpx		|	ffprobe		|	websockets	|	brotli	|	simple_inotify	|	psutil	|	messaging.py	|
-|	----			|	----	|	----		|	----		|	----		|	----		|	----	|	----		|	----	|	----		|
-|	video.py		|	UNIX	|	3.8+		|	M		|			|			|		|			|		|			|
-|	favlist.py		|	UNIX	|	3.8+		|	M		|			|			|		|			|		|			|
-|	user.py			|	UNIX	|	3.8+		|	M		|			|			|		|			|		|			|
-|	verify.py		|	any	|	3.8+		|			|	O		|			|		|			|		|			|
-|	live_rec.py		|	UNIX	|	3.8+		|	M		|			|	O		|	O	|			|		|			|
-|	monitor.py		|	UNIX	|	3.8+		|	M		|			|			|		|			|		|	O		|
-|	messaging.py		|	Linux	|	3.8+		|			|			|			|		|			|		|			|
-|	video_database.py	|	any	|	3.8+		|			|			|			|		|			|		|			|
-|	database_daemon.py	|	Linux	|	3.8+		|			|			|			|		|	M		|	O	|			|
-|	merge_video.py		|	any	|	3.8+		|			|			|			|		|			|		|			|
+|	项目			|	OS	|	Python		|	httpx		|	ffprobe		|	websockets	|	brotli	|	psutil	|	messaging.py	|
+|	----			|	----	|	----		|	----		|	----		|	----		|	----	|	----	|	----		|
+|	video.py		|	UNIX	|	3.8+		|	M		|			|			|		|		|	O		|
+|	favlist.py		|	UNIX	|	3.8+		|	M		|			|			|		|		|			|
+|	user.py			|	UNIX	|	3.8+		|	M		|			|			|		|		|			|
+|	verify.py		|	any	|	3.8+		|			|	O		|			|		|		|			|
+|	live_rec.py		|	UNIX	|	3.8+		|	M		|			|	O		|	O	|		|	O		|
+|	monitor.py		|	UNIX	|	3.8+		|	M		|			|			|		|		|	O		|
+|	messaging.py		|	Linux	|	3.8+		|			|			|			|		|		|			|
+|	video_database.py	|	any	|	3.8+		|			|			|			|		|		|			|
+|	database_daemon.py	|	UNIX	|	3.8+		|			|			|			|		|	O	|	O		|
+|	merge_video.py		|	any	|	3.8+		|			|			|			|		|		|			|
 
 ### http后端
 
@@ -108,13 +109,15 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 
 ### 桌面应用
 
-|	项目			|	OS	|	Python		|	httpx		|	python3-gi	|	websockets	|	brotli	|
-|	----			|	----	|	----		|	----		|	----		|	----		|	----	|
-|	live_notify.py		|	Linux	|	3.8+		|	M		|	M		|			|		|
-|	danmaku_reaction.py	|	Windows	|	3.11+		|	M		|			|	M		|	M	|
+|	项目			|	OS	|	Python		|	httpx		|	python3-gi	|	websockets	|	brotli	|	messaging.py	|
+|	----			|	----	|	----		|	----		|	----		|	----		|	----	|	----		|
+|	live_notify.py		|	Linux	|	3.8+		|	M		|	M		|			|		|	O		|
+|	danmaku_reaction.py	|	Windows	|	3.11+		|	M		|			|	M		|	M	|			|
 
 ### 关于消息传递服务
 + messaging.py 封装了模块间通信的功能。该文件直接运行时作为消息服务器，被其他库包含时提供消息传递接口
++ 创建 MessagingClient 时可传入服务地址，若地址为空，则使用环境变量 BILI_ARCH_MSG_ADDR 中的地址
++ 创建 MessagingClient 时设置 `allow_dummy=True`（默认），在服务不可达时将作为 *dummy* 客户端继续运行
 + 由于目前的实现使用了Linux平台特定的功能，因此模块间消息传递只可在Linux环境下正常运作
 + 在非Linux平台上，若 messaging.py 为可选依赖，仅消息传递无法工作，其他功能不受影响
 
@@ -124,8 +127,8 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 + `multiprocessing` 创建子进程时使用`fork`方式，部分代码依赖`fork(2)`的行为
 + `fops.locked_path` 使用 `flock(2)` 锁定文件
 + 使用 `AF_UNIX` `SOCK_SEQPACKET` 进行本地通信
-+ 使用 `signal(7)` 信号触发特定操作或中断系统调用
-+ 使用平台特定API如 `inotify(7)` `epoll(7)` `timerfd_create(2)` `eventfd(2)`
++ 使用 `signal(7)` 信号退出服务或触发特定操作
++ 使用平台特定API如 `epoll(7)` `timerfd_create(2)`
 + 部署方案依赖`systemd`，使用了 *symbolic link*, *tmpfs*, *bind mount*
 
 
@@ -217,7 +220,7 @@ sudo systemctl restart lighttpd
 #!/bin/sh
 REC_SERVER=localhost
 cd /PATH/TO/CODE
-exec desktop/live_notify.py --monitor-url http://$REC_SERVER/api/live_status config/rec_config.json
+exec desktop/live_notify.py --url http://$REC_SERVER/api/live_status config/rec_config.json
 ```
 
 
@@ -292,3 +295,11 @@ python desktop/danmaku_reaction.py -u $HOME/bili-credential.txt config/danmaku.t
 	+ https://wiki.openssl.org/index.php/Random_fork-safety
 
 + As a result, protecting `ssl` module against `fork(2)` is considered unnecessary and is not implemented in this project.
+
+### About A.I. models and agents involved
+
+Some code of the project is written with the assistance of AI. See comments in each file for more info. Thanks for your great work !
++ [Copilot](https://github.com/copilot) GPT 4.1 and various models in *auto* mode
++ [opencode](https://opencode.ai/go) [deepseek-v4-flash](https://chat.deepseek.com)
++ [Github Copilot Cli](https://github.com/cli/cli)
++ [Pi](https://github.com/earendil-works/pi)

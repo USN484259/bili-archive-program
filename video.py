@@ -8,12 +8,13 @@ import asyncio
 import logging
 import collections
 
-from constants import default_names, bvid_pattern
+from constants import default_names, bvid_pattern, topic
 import fops
 import runtime
 import network
 import verify
 from utils import list_bv
+from messaging import MessagingClient
 
 # constants
 
@@ -407,17 +408,27 @@ async def do_update(sess, bv, path, force, /, stall = None, ignore = None, max_d
 
 # methods
 
-async def download(sess, bv, video_root, mode, /, stall = None, **kwargs):
+async def download(sess, bv, video_root, mode, /, stall = None, msg_client = None, **kwargs):
 	if mode == "fix" and not os.path.isfile(os.path.join(video_root, bv, "info.json")):
 		mode = "update"
 
 	logger.debug("downloading %s, path %s, mode %s", bv, video_root, mode)
-
-	if mode == "fix":
-		await do_fix(sess, bv, video_root, stall, **kwargs)
-	else:
-		await do_update(sess, bv, video_root, mode == "force", stall, **kwargs)
-
+	done = False
+	try:
+		if mode == "fix":
+			await do_fix(sess, bv, video_root, stall, **kwargs)
+		else:
+			await do_update(sess, bv, video_root, mode == "force", stall, **kwargs)
+		done = True
+	finally:
+		if msg_client:
+			msg_client.send(topic.video, json = {
+				"timestamp":	int(time.time()),
+				"bvid":		bv,
+				"mode":		mode,
+				"path":		video_root,
+				"done":		done,
+			})
 
 async def batch_download(sess, bv_list, video_root, mode, **kwargs):
 	logger.info("downloading %d videos", len(bv_list))
@@ -452,12 +463,13 @@ async def main(args):
 	logger.debug(bv_list)
 
 	video_root = args.dir or runtime.subdir("video")
+	msg_client = MessagingClient(args.msg_addr)
 	async with network.session() as sess:
-		await batch_download(sess, bv_list, video_root, mode = args.mode, ignore = args.ignore, prefer = args.prefer, reject = args.reject)
+		await batch_download(sess, bv_list, video_root, mode = args.mode, msg_client = msg_client, ignore = args.ignore, prefer = args.prefer, reject = args.reject)
 
 
 if __name__ == "__main__":
-	args = runtime.parse_args(("network", "auth", "dir", "bandwidth", "video_mode", "video_ignore", "prefer"), [
+	args = runtime.parse_args(("network", "auth", "dir", "bandwidth", "video_mode", "video_ignore", "messaging", "prefer"), [
 		(("inputs",), {"nargs" : '*'}),
 	])
 	asyncio.run(main(args))

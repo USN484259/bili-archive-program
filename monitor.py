@@ -199,6 +199,7 @@ class Monitor:
 		self.records = {}
 		self.msg_client = MessagingClient(args.msg_addr)
 		self.sess = network.session()
+		self.started = False
 		self.reload = False
 		self.restart = False
 
@@ -215,6 +216,7 @@ class Monitor:
 
 
 	async def __aenter__(self):
+		self.start()
 		return self
 
 	async def __aexit__(self, *args):
@@ -264,8 +266,7 @@ class Monitor:
 
 	def on_task_stop(self, rec):
 		cur_time = int(time.time())
-		self.msg_client.send(constants.topic.live_rec, json = {
-			"from":		"monitor",
+		self.msg_client.send(constants.topic.live_monitor, json = {
 			"timestamp":	cur_time,
 			"rid":		rec.rid(),
 			"uid":		rec.uid(),
@@ -286,8 +287,7 @@ class Monitor:
 		rec.start_task(rec_path, self.args.rec_log, self.args.relay_root, (self.sess, self.msg_client))
 
 		cur_time = int(time.time())
-		self.msg_client.send(constants.topic.live_rec, json = {
-			"from":		"monitor",
+		self.msg_client.send(constants.topic.live_monitor, json = {
 			"timestamp":	cur_time,
 			"rid":		rec.rid(),
 			"uid":		rec.uid(),
@@ -347,7 +347,8 @@ class Monitor:
 				info = self.get_status()
 				resp = {
 					"timestamp":	int(time.time()),
-					"live-status":	info,
+					"action":	"publish-live-status",
+					"live_status":	info,
 				}
 				self.msg_client.send(topic, json = resp)
 				sent = True
@@ -356,17 +357,21 @@ class Monitor:
 			logger.exception("exception in handle_message")
 
 
-	async def start(self):
+	def start(self):
+		if self.started:
+			return
 		self.reload_config()
 		signal.signal(signal.SIGUSR1, self.on_signal)
 		signal.signal(signal.SIGUSR2, self.on_signal)
+		self.msg_client.subscribe(constants.topic.live_status)
 
-		if not self.msg_client.is_dummy():
-			asyncio.get_running_loop().add_reader(self.msg_client.fileno(), self.handle_message)
-
+		asyncio.get_running_loop().add_reader(self.msg_client.fileno(), self.handle_message)
+		self.started = True
 
 	async def run(self):
-		await self.start()
+		if not self.started:
+			raise RuntimeError("Monitor not started")
+
 		while True:
 			if self.reload:
 				try:
@@ -401,28 +406,6 @@ class Monitor:
 async def main(args):
 	async with Monitor(args) as monitor:
 		await monitor.run()
-
-	config = Config(args)
-	await config.update()
-
-	def sig_reload(signum, frame):
-		global scheduled_reload
-		logger.info("reload scheduled")
-		scheduled_reload = True
-
-	def sig_restart(signum, frame):
-		global scheduled_restart
-		logger.info("restart scheduled")
-		scheduled_restart = True
-
-	signal.signal(signal.SIGUSR1, sig_reload)
-	signal.signal(signal.SIGUSR2, sig_restart)
-
-	msg_client = MessagingClient(args.msg_addr)
-	if not msg_client.is_dummy():
-		asyncio.get_running_loop().add_reader(msg_client.fileno(), lambda: asyncio.create_task(handle_message(msg_client)))
-
-	await monitor_task(config, args.interval, msg_client)
 
 
 if __name__ == "__main__":

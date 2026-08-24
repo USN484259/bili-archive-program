@@ -28,6 +28,7 @@ class live_status_handler(AsyncHttpResponseMixin, AsyncFcgiHandler):
 
 
 class LiveStatusServer(AsyncFcgiServer):
+	live_status_query_timeout = 2
 	def __init__(self, handler, msg_addr, interval):
 		if interval <= 0:
 			raise ValueError("invalid interval " + str(interval))
@@ -39,6 +40,7 @@ class LiveStatusServer(AsyncFcgiServer):
 		self.resp_timestamp = 0
 		self.cached_result = {}
 
+		self.msg_client.subscribe(constants.topic.live_status)
 		asyncio.get_running_loop().add_reader(self.msg_client.fileno(), self.handle_message)
 
 	async def get(self):
@@ -55,7 +57,7 @@ class LiveStatusServer(AsyncFcgiServer):
 				self.req_timestamp = cur_time
 
 			try:
-				await asyncio.wait_for(self.cond.wait(), timeout = self.interval)
+				await asyncio.wait_for(self.cond.wait(), timeout = self.live_status_query_timeout)
 			except asyncio.TimeoutError:
 				logger.warning("timeout waiting for live-status")
 
@@ -63,19 +65,21 @@ class LiveStatusServer(AsyncFcgiServer):
 
 	async def set_result(self, resp):
 		async with self.cond:
+			result = resp.get("live_status")
+			if not result:
+				return
 			self.resp_timestamp = time.time()
-			self.cached_result = resp.get("live-status", {})
+			self.cached_result = result
 			self.cond.notify_all()
 
 	def handle_message(self):
 		try:
-			if not self.msg_client.wait(0):
-				return
+			self.msg_client.wait(0)
 			while True:
 				topic, resp = self.msg_client.recv(constants.topic.live_status)
 				if not topic:
 					return
-				if not isinstance(resp, dict):
+				if not isinstance(resp, dict) or resp.get("action", "") != "publish-live-status":
 					continue
 				asyncio.get_running_loop().create_task(self.set_result(resp))
 
@@ -90,6 +94,7 @@ async def main(args):
 
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser()
+	parser.add_argument("-v", "--verbose", action = "count", default = 0)
 	parser.add_argument("--status-interval", type = int, default = 5)
 	parser.add_argument("--msg-addr")
 	parser.add_argument("--danmaku-root")
@@ -117,5 +122,5 @@ if __name__ == "__main__":
 		else:
 			os.waitpid(pid, os.WNOHANG)
 
-	logger_init()
+	logger_init(args.verbose)
 	asyncio.run(main(args))

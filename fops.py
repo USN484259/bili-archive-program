@@ -159,11 +159,14 @@ def create_unix_socket(path, *, sock_type = socket.SOCK_STREAM, mode = 0o600):
 	# https://stackoverflow.com/questions/11781134/change-linux-socket-file-permissions
 	sock = socket.socket(socket.AF_UNIX, sock_type)
 	try:
-		os.fchmod(sock.fileno(), 0o600)
+		with suppress(OSError):
+			os.fchmod(sock.fileno(), 0o600)
 		with suppress(FileNotFoundError):
 			os.unlink(path)
 		sock.bind(path)
-		os.chmod(path, mode)
+		with suppress(OSError):
+			os.chmod(path, mode)
+		sock.listen()
 		return sock
 	except:
 		sock.close()

@@ -13,6 +13,7 @@ import logging
 from collections import defaultdict
 from contextlib import suppress
 
+openpyxl = None
 with suppress(ModuleNotFoundError):
 	import openpyxl
 
@@ -99,7 +100,7 @@ async def main(args):
 		writer = csv_writer(args.output)
 
 	with writer:
-		writer.write_header("发送时间", "用户", "点播数", "价格", "BV链接", "视频时长", "视频标题", "SC内容")
+		writer.write_header("发送时间", "uid", "用户", "点播数", "价格", "BV链接", "视频时长", "视频标题", "SC内容")
 		uid_counter = defaultdict(lambda: 0)
 		while True:
 			try:
@@ -131,11 +132,11 @@ async def main(args):
 							except Exception as e:
 								logger.warning("cannot get BV info: %s", str(e))
 						tm = time.localtime(obj["send_time"] // 1000)
-						time_str = "%d/%02d/%02d %02d:%02d:%02d" % tm[:6]
+						time_str = "%d/%02d/%02d %02d:%02d:%02d.%03d" % (tm[:6] + (obj["send_time"] % 1000,))
 						duration_str = (duration >= 3600 and ("%d:" % duration // 3600) or "") + "%02d:%02d" % (duration % 3600 // 60, duration % 60)
 						count = uid_counter[uid] + 1
 						uid_counter[uid] = count
-						writer.write_row(time_str, uname, count, price, result.strip(), duration_str, title.strip(), message)
+						writer.write_row(time_str, str(uid), uname, count, price, result.strip(), duration_str, title.strip(), message)
 					elif "BV" in message:
 						logger.warning("unknown BV from %s: %s", uname, message)
 						continue
@@ -150,7 +151,7 @@ async def main(args):
 if __name__ == "__main__":
 	args = runtime.parse_args(("network",), [
 		(("-o", "--output"), {"required": True}),
-		(("-f", "--format"), {}),
+		(("-f", "--format"), {"choices" : ["csv", "xlsx"], "default": "csv"}),
 	])
 	asyncio.run(main(args))
 

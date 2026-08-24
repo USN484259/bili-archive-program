@@ -9,11 +9,12 @@ import logging
 import functools
 from contextlib import suppress, AsyncExitStack
 
-from constants import default_names
+from constants import default_names, topic
 import fops
 import runtime
 import network
 import hls
+from messaging import MessagingClient
 
 # constants
 
@@ -102,8 +103,7 @@ def make_record_name(uname, title):
 	return (uname + time.strftime("_%y_%m_%d_%H_%M_") + title).translate(name_escape_table)
 
 
-async def record_flv(sess, info, name_prefix):
-	file_name = name_prefix + ".flv"
+async def record_flv(sess, info, file_name):
 	connected = False
 
 	def on_file_open(*args):
@@ -122,11 +122,11 @@ async def record_flv(sess, info, name_prefix):
 		raise RuntimeError("record_flv: no valid URL")
 
 
-async def record_hls(sess, info, name_prefix):
+async def record_hls(sess, info, file_name):
 	url_info_list = info.get("url_info")
 	last_url_index = 0
 	cur_url_index = 0
-	with fops.locked_file(name_prefix + ".zip", "x+b") as zip_file:
+	with fops.locked_file(file_name, "x+b") as zip_file:
 		with zipfile.ZipFile(zip_file, mode = "w") as archive:
 			m3u = hls.M3u()
 			stall = None
@@ -216,8 +216,9 @@ async def record_danmaku(rid, path, /, relay_path = None, *, fetch_images = True
 						logger.exception("exception in dispatch danmaku")
 
 
-async def record(sess, rid, path, *, do_record_danmaku = True, relay_path = None, prefer = None, reject = None):
+async def record(sess, rid, path, *, msg_client = None, do_record_danmaku = True, relay_path = None, prefer = None, reject = None):
 	danmaku_task = None
+	need_stop_msg = False
 	try:
 		logger.debug("record live %d into %s", rid, path)
 		if prefer is None:
@@ -236,6 +237,17 @@ async def record(sess, rid, path, *, do_record_danmaku = True, relay_path = None
 			logger.warning("missing credential, not recording danmaku")
 			do_record_danmaku = False
 
+		if msg_client:
+			msg_client.send(topic.live_rec, json = {
+				"timestamp":	int(time.time()),
+				"event":	"record-started",
+				"rid":		rid,
+				"path":		path,
+				"danmaku":	do_record_danmaku,
+				"relay":	relay_path,
+			})
+			need_stop_msg = True
+
 		if do_record_danmaku:
 			danmaku_task = asyncio.create_task(record_danmaku(rid, path, relay_path))
 			danmaku_task.add_done_callback(asyncio.Task.result)
@@ -243,7 +255,7 @@ async def record(sess, rid, path, *, do_record_danmaku = True, relay_path = None
 		stat_fail_count = 0
 		stall = runtime.Stall(LIVE_STAT_STALL_TIME)
 		while True:
-			start_time = time.time()
+			start_time = int(time.time())
 			info = None
 			try:
 				info = await get_live_url(sess, rid)
@@ -261,8 +273,6 @@ async def record(sess, rid, path, *, do_record_danmaku = True, relay_path = None
 					raise
 
 			try:
-				name_prefix = os.path.join(path, str(int(start_time)))
-
 				url_info = find_best_url(info, prefer = prefer, reject = reject)
 				if not url_info:
 					norej_info = find_best_url(info, prefer = prefer)
@@ -270,10 +280,25 @@ async def record(sess, rid, path, *, do_record_danmaku = True, relay_path = None
 						logger.warning("bad reject: %s", reject)
 						url_info = norej_info
 
-				if "hls" in url_info.get("protocol_name"):
-					await record_hls(sess, url_info, name_prefix)
+				protocol_name = url_info.get("protocol_name")
+				is_hls = "hls" in protocol_name
+
+				rec_name = str(start_time) + (is_hls and ".zip" or ".flv")
+
+				if msg_client:
+					msg_client.send(topic.live_rec, json = {
+						"timestamp":	start_time,
+						"event":	"record-file",
+						"rid":		rid,
+						"path":		path,
+						"type":		protocol_name,
+						"name":		rec_name,
+					})
+
+				if is_hls:
+					await record_hls(sess, url_info, os.path.join(path, rec_name))
 				else:
-					await record_flv(sess, url_info, name_prefix)
+					await record_flv(sess, url_info, os.path.join(path, rec_name))
 
 			except Exception as e:
 				logger.exception("exception on recording")
@@ -288,6 +313,14 @@ async def record(sess, rid, path, *, do_record_danmaku = True, relay_path = None
 			with suppress(asyncio.CancelledError):
 				danmaku_task.cancel()
 
+		if need_stop_msg:
+			msg_client.send(topic.live_rec, json = {
+				"timestamp":	int(time.time()),
+				"event":	"record-stopped",
+				"rid":		rid,
+				"path":		path,
+			})
+
 
 # entrance
 
@@ -295,6 +328,7 @@ async def main(args):
 	live_root = args.dir or runtime.subdir("live")
 	user_info = {}
 	async with network.session() as sess:
+		msg_client = MessagingClient(args.msg_addr)
 		while True:
 			try:
 				info = await get_live_info(sess, args.room)
@@ -311,7 +345,7 @@ async def main(args):
 				if status == 1:
 					rec_name = make_record_name(user_info.get("uname", str(uid)), info.get("title"))
 					with fops.locked_path(live_root, rec_name) as rec_path:
-						await record(sess, args.room, rec_path, do_record_danmaku = (not args.no_danmaku), relay_path = args.relay, prefer = args.prefer, reject = args.reject)
+						await record(sess, args.room, rec_path, msg_client = msg_client, do_record_danmaku = (not args.no_danmaku), relay_path = args.relay, prefer = args.prefer, reject = args.reject)
 
 			except Exception:
 				logger.exception("exception on checking")
@@ -325,7 +359,7 @@ async def main(args):
 
 
 if __name__ == "__main__":
-	args = runtime.parse_args(("network", "auth", "dir", "prefer"), [
+	args = runtime.parse_args(("network", "auth", "dir", "messaging", "prefer"), [
 		(("room",), {"type" : int}),
 		(("-i", "--interval"), {"type" : int, "default" : 30}),
 		(("--monitor",),{"action" : "store_true"}),
