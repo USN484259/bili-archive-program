@@ -1,0 +1,2 @@
+/path/to/bili-archive-program			/srv/http/code		none	bind,ro,nodev,nosuid,nofail
+tmpfs						/srv/http/tmp		tmpfs	nodev,nosuid,noexec,nosymfollow,nofail,gid=33,mode=3777

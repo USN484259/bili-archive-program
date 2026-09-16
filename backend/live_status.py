@@ -33,7 +33,7 @@ class LiveStatusServer(AsyncFcgiServer):
 		if interval <= 0:
 			raise ValueError("invalid interval " + str(interval))
 		super().__init__(handler)
-		self.msg_client = MessagingClient(msg_addr, allow_dummy = False)
+		self.msg_client = MessagingClient(msg_addr)
 		self.interval = interval
 		self.cond = asyncio.Condition()
 		self.req_timestamp = 0

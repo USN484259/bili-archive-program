@@ -20,6 +20,7 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 + video_database.py	将视频信息缓存进SQLite数据库
 + database_daemon.py	监视视频目录并自动更新数据库
 + merge_video.py	将缓存的视频合并进主视频存储中
++ live_transcribe.py	将视频中的人声转录成字幕，支持本地/HTTP模式
 
 ### 常见参数说明
 
@@ -69,30 +70,32 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 
 ### 工具模块
 
-|	项目			|	OS	|	Python		|	httpx		|	ffprobe		|	websockets	|	brotli	|	psutil	|	messaging.py	|
-|	----			|	----	|	----		|	----		|	----		|	----		|	----	|	----	|	----		|
-|	video.py		|	UNIX	|	3.8+		|	M		|			|			|		|		|	O		|
-|	favlist.py		|	UNIX	|	3.8+		|	M		|			|			|		|		|			|
-|	user.py			|	UNIX	|	3.8+		|	M		|			|			|		|		|			|
-|	verify.py		|	any	|	3.8+		|			|	O		|			|		|		|			|
-|	live_rec.py		|	UNIX	|	3.8+		|	M		|			|	O		|	O	|		|	O		|
-|	monitor.py		|	UNIX	|	3.8+		|	M		|			|			|		|		|	O		|
-|	messaging.py		|	Linux	|	3.8+		|			|			|			|		|		|			|
-|	video_database.py	|	any	|	3.8+		|			|			|			|		|		|			|
-|	database_daemon.py	|	UNIX	|	3.8+		|			|			|			|		|	O	|	O		|
-|	merge_video.py		|	any	|	3.8+		|			|			|			|		|		|			|
+|	项目			|	OS	|	Python		|	httpx		|	ffmpeg/ffprobe		|	whisper-cli	|	websockets	|	brotli	|	psutil	|	messaging.py	|
+|	----			|	----	|	----		|	----		|	----			|	----		|	----		|	----	|	----	|	----		|
+|	video.py		|	UNIX	|	3.8+		|	M		|				|			|			|		|		|	O		|
+|	favlist.py		|	UNIX	|	3.8+		|	M		|				|			|			|		|		|			|
+|	user.py			|	UNIX	|	3.8+		|	M		|				|			|			|		|		|			|
+|	verify.py		|	any	|	3.8+		|			|	O			|			|			|		|		|			|
+|	live_rec.py		|	UNIX	|	3.8+		|	M		|				|			|	O		|	O	|		|	O		|
+|	monitor.py		|	UNIX	|	3.8+		|	M		|				|			|			|		|		|	O		|
+|	messaging.py		|	Linux	|	3.8+		|			|				|			|			|		|		|			|
+|	video_database.py	|	any	|	3.8+		|			|				|			|			|		|		|			|
+|	database_daemon.py	|	UNIX	|	3.8+		|			|				|			|			|		|	O	|	O		|
+|	merge_video.py		|	any	|	3.8+		|			|				|			|			|		|		|			|
+|	live_transcribe.py	|	UNIX	|	3.8+		|	O		|	M			|	M		|			|		|	O	|	O		|
 
 ### http后端
 
-|	项目		|	OS	|	Python		|	simple-fastcgi	|	httpx		|	messaging.py	|
-|	----		|	----	|	----		|	----		|	----		|	----		|
-|	dir_listing.py	|	any	|	3.8+		|	M		|			|			|
-|	zip_access.py	|	any	|	3.8+		|	M		|			|			|
-|	video_cache.py	|	UNIX	|	3.8+		|	M		|	M		|			|
-|	live_status.py	|	Linux	|	3.8+		|	M		|	M		|	M		|
-|	bili_proxy.py	|	any	|	3.8+		|	M		|	M		|			|
-|	image_cache.py	|	UNIX	|	3.8+		|	M		|	M		|			|
-|	video_query.py	|	any	|	3.8+		|	M		|			|			|
+|	项目			|	OS	|	Python		|	simple-fastcgi	|	simple-inotify	|	httpx		|	messaging.py	|
+|	----			|	----	|	----		|	----		|	----		|	----		|	----		|
+|	dir_listing.py		|	any	|	3.8+		|	M		|			|			|			|
+|	zip_access.py		|	any	|	3.8+		|	M		|			|			|			|
+|	video_cache.py		|	UNIX	|	3.8+		|	M		|			|	M		|			|
+|	live_status.py		|	Linux	|	3.8+		|	M		|			|	M		|	M		|
+|	bili_proxy.py		|	any	|	3.8+		|	M		|			|	M		|			|
+|	image_cache.py		|	UNIX	|	3.8+		|	M		|			|	M		|			|
+|	video_query.py		|	any	|	3.8+		|	M		|			|			|			|
+|	transcription.py	|	Linux	|	3.8+		|	M		|	O		|			|	O		|
 
 ### http前端
 
@@ -166,10 +169,15 @@ sudo mkdir -p /etc/systemd/system/lighttpd.service.d/
 sudo install -m 0644 config/override.conf /etc/systemd/system/lighttpd.service.d/override.conf
 sudoedit /etc/systemd/system/lighttpd.service.d/override.conf	# 修改 CODE_PATH
 
+# 添加挂载点
+cat config/fstab | sudo tee -a /etc/fstab
+sudo systemctl daemon-reload
+sudo mount -a
+
 # 创建http目录结构
 sudo mkdir -p /srv/http/code /srv/http/tmp /srv/http/html /srv/http/fcgi
 sudo install -m 0664 config/lighttpd.conf /srv/http/lighttpd.conf
-sudo chown root:$(id -ng) /srv/http/html /srv/http/fcgi /srv/http/lighttpd.conf
+sudo chown root:1000 /srv/http/html /srv/http/fcgi /srv/http/lighttpd.conf	# your gid
 sudo chmod 0775 /srv/http/html /srv/http/fcgi
 
 # 初始化html目录
@@ -185,6 +193,7 @@ mkdir -p cache
 cd cache
 ln -s ../../tmp/video
 ln -s ../../tmp/image
+cd ..
 # 链接其他需要通过http访问的内容
 
 # 初始化fcgi目录
@@ -211,6 +220,17 @@ vim /srv/http/lighttpd.conf
 sudo systemctl daemon-reload
 sudo systemctl restart lighttpd
 
+```
+
+### 直播字幕转录服务端
+
+```sh
+mkdir -p $HOME/.config/systemd/user/
+cp config/bili-arch-transcription.service $HOME/.config/systemd/user/
+vim $HOME/.config/systemd/user/bili-arch-transcription.service	# 修改相关路径
+sudo loginctl enable-linger 1000	# your uid
+systemctl --user daemon-reload
+systemctl --user enable --now bili-arch-transcription.service
 ```
 
 ### 直播通知
@@ -255,14 +275,15 @@ python desktop/danmaku_reaction.py -u $HOME/bili-credential.txt config/danmaku.t
 + [Python](https://www.python.org/) is a programming language that lets you work quickly and integrate systems more effectively.
 + [httpx](https://www.python-httpx.org/) A next-generation HTTP client for Python.
 + [FFmpeg](https://ffmpeg.org/) A complete, cross-platform solution to record, convert and stream audio and video.
-+ [simple-fastcgi](https://pypi.org/project/simple-fastcgi/) simple FastCGI protocol parser and sync/async handler in pure python
++ [simple-fastcgi](https://pypi.org/project/simple-fastcgi/) simple FastCGI protocol parser and sync/async handler in pure Python.
 + [simple_inotify](https://pypi.org/project/simple-inotify/) Very thin inotify(7) wrapper for Linux.
-+ [psutil](https://pypi.org/project/psutil/) is a cross-platform library for retrieving information on running processes and system utilizationin Python.
-+ [websockets](https://pypi.org/project/websockets/) An implementation of the WebSocket Protocol
++ [psutil](https://pypi.org/project/psutil/) is a cross-platform library for retrieving information on running processes and system utilization in Python.
++ [websockets](https://pypi.org/project/websockets/) An implementation of the WebSocket Protocol.
 + [flv.js](https://github.com/Bilibili/flv.js) An HTML5 Flash Video (FLV) Player written in pure JavaScript without Flash.
 + [hls.js](https://github.com/video-dev/hls.js) is a JavaScript library that implements an HTTP Live Streaming client.
 + [SQLite](https://sqlite.org/) is a C-language library that implements a small, fast, self-contained, high-reliability, full-featured, SQL database engine.
 + [lighttpd](https://www.lighttpd.net/) is a secure, fast, compliant, and very flexible web server that has been optimized for high-performance environments.
++ [whisper.cpp](https://github.com/ggml-org/whisper.cpp) High-performance inference of OpenAI's Whisper automatic speech recognition (ASR) model in C/C++.
 
 ### 其他链接
 
@@ -298,7 +319,7 @@ python desktop/danmaku_reaction.py -u $HOME/bili-credential.txt config/danmaku.t
 
 ### About A.I. models and agents involved
 
-Some code of the project is written with the assistance of AI. See comments in each file for more info. Thanks for your great work !
+Some code of the project is written with the assistance of AI. See comments in each file for more info. Thanks for their great work !
 + [Copilot](https://github.com/copilot) GPT 4.1 and various models in *auto* mode
 + [opencode](https://opencode.ai/go) [deepseek-v4-flash](https://chat.deepseek.com)
 + [Github Copilot Cli](https://github.com/cli/cli)

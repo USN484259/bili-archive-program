@@ -1,0 +1,14 @@
+[Unit]
+Description=bili-arch live transcription service
+After=bili-arch-messaging.service
+# Requires=bili-arch-messaging.service
+
+[Service]
+Type=simple
+Environment=BILI_ARCH_MSG_ADDR=/srv/http/tmp/messaging.socket
+WorkingDirectory=/srv/http/code
+ExecStart=/usr/bin/python3 backend/transcription.py -v -s /srv/http/tmp/transcription.socket --watch /path/to/bili-arch --hash sha1 -- /srv/http/html/bili-arch
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

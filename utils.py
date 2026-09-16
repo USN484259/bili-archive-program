@@ -27,7 +27,11 @@ def parse_size(size_str):
 
 
 def get_relative_path(path, root):
-	common_path = os.path.commonpath((path, root))
+	try:
+		common_path = os.path.commonpath((path, root))
+	except ValueError:
+		return None
+
 	if common_path != root:
 		return None
 
@@ -35,7 +39,7 @@ def get_relative_path(path, root):
 	if ".." in rel_path:
 		return None
 
-	assert(rel_path[0] != '/')
+	assert(rel_path and rel_path[0] != '/')
 	return rel_path
 
 
