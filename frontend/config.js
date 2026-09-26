@@ -8,6 +8,7 @@ export const image_cache_root = "/cache/image/"
 
 export const player_url = "/player.html"
 export const video_page_url = "/video_page.html"
+export const srt_viewer_url = "/srt_viewer.html"
 
 export const video_cache_api = "/api/video_cache"
 export const live_status_api = "/api/live_status"

@@ -36,9 +36,10 @@ import logging
 import argparse
 import selectors
 import threading
+from stat import S_ISDIR
 from queue import SimpleQueue
 from contextlib import suppress
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 from urllib.parse import parse_qs, unquote
 
 from simple_fastcgi import FcgiServer, HttpResponseMixin, FcgiHandler
@@ -157,6 +158,9 @@ class HashCache:
 		try:
 			stat = os.stat(path)
 			size = stat.st_size
+			if os.access(path + ".srt", os.F_OK):
+				logger.warning("srt exists for %s, refused", path)
+				return False
 			wd = self.observer.add_watch(path, inotify_watch_mask)
 		except OSError as e:
 			logger.warning("cannot watch on media %s: %s", path, str(e))
@@ -189,6 +193,7 @@ class HashCache:
 		with suppress(OSError):
 			self.observer.rm_watch(rec.wd)
 		return True
+
 
 	def get(self, path, hash_name, *, timeout = None):
 		if hash_name not in self.hash_methods:
@@ -265,7 +270,7 @@ class HashCache:
 			proc.nice(self.nice_value)
 			proc.ionice(psutil.IOPRIO_CLASS_IDLE)
 		except Exception as e:
-			logger.warning("cannot set IO priority: %s", str(e))
+			logger.warning("cannot set worker thread priority: %s", str(e))
 
 		self.measure_hashing_speed()
 
@@ -342,11 +347,26 @@ class transcription_handler(HttpResponseMixin, FcgiHandler):
 			logger.warning("invalid file size %d for %s", len(payload), path)
 			return self.send_response(413)
 
-		os.makedirs(os.path.dirname(path), exist_ok = True)
+		dir_path = os.path.dirname(path)
+		os.makedirs(dir_path, exist_ok = True)
+
+		dir_stat = None
+		with suppress(OSError):
+			dir_stat = os.stat(dir_path)
+			logger.debug("dir %s, mode %o, times %d/%d", dir_path, dir_stat.st_mode, dir_stat.st_atime_ns, dir_stat.st_mtime_ns)
+			if not S_ISDIR(dir_stat.st_mode):
+				dir_stat = None
 
 		try:
 			with open(path, mode = "xb") as f:
+				if dir_stat:
+					try:
+						os.utime(dir_path, ns = (dir_stat.st_atime_ns, dir_stat.st_mtime_ns))
+					except OSError as e:
+						logger.warning("cannot restore dir times %d/%d: %s", dir_stat.st_atime_ns, dir_stat.st_mtime_ns, str(e))
+
 				f.write(payload)
+
 			logger.info("saved to %s, size %d", path, len(payload))
 			return self.send_response(201)
 		except FileExistsError:
@@ -451,12 +471,14 @@ class transcription_handler(HttpResponseMixin, FcgiHandler):
 
 	def handle_get(self):
 		doc_root = self.environ.get("DOCUMENT_ROOT")
-		# "list" holds doc-root-relative URL paths (leading '/') so clients
-		# can urljoin them directly to fetch the media and PUT the SRT;
+		# "pending" and "completed" holds doc-root-relative URL paths (leading '/')
+		# so clients can urljoin them directly to fetch the media and PUT the SRT;
 		# "path" is the URL prefix of live_root under doc_root (compat)
+		(pending, completed) = self.server.get_media_list(doc_root)
 		result = {
 			"path": '/' + get_relative_path(self.server.live_root, doc_root),
-			"list": self.server.get_media_list(doc_root),
+			"pending": pending,
+			"completed": completed,
 			"hash": self.server.hash_cache and self.server.hash_cache.methods(),
 			"hashing_speed": self.server.hash_cache and self.server.hash_cache.get_hashing_speed()
 		}
@@ -464,8 +486,8 @@ class transcription_handler(HttpResponseMixin, FcgiHandler):
 
 
 	def handle_post(self):
-		# {add|del: [doc-root-relative paths, matching the GET "list" items]}
-		# lets a client update the pending set without restarting the server
+		# {add|del|done: [doc-root-relative paths, matching the GET "list" items]}
+		# lets a client update the pending/completed set without restarting the server
 		try:
 			info = json.loads(self.read().decode())
 		except (UnicodeError, ValueError):
@@ -473,10 +495,12 @@ class transcription_handler(HttpResponseMixin, FcgiHandler):
 
 		add_list = info.pop("add", None)
 		del_list = info.pop("del", None)
+		done_list = info.pop("done", None)
 
 		if ((add_list is None or isinstance(add_list, list))
 		and (del_list is None or isinstance(del_list, list))
-		and (add_list or del_list) and not info):
+		and (done_list is None or isinstance(done_list, list))
+		and (add_list or del_list or done_list) and not info):
 			pass
 		else:
 			return self.send_response(418)
@@ -502,6 +526,9 @@ class transcription_handler(HttpResponseMixin, FcgiHandler):
 
 		if del_list:
 			process_items(del_list, self.server.del_media_file)
+
+		if done_list:
+			process_items(done_list, self.server.done_media_file)
 
 		return self.send_response(200)
 
@@ -535,10 +562,11 @@ class TranscriptionServer(FcgiServer):
 		self.watch_paths = set()
 		self.filter_path = args.filter
 		self.matches = []
-		self.msg_client = MessagingClient(args.msg_addr)
+		self.msg_client = MessagingClient(args.msg_addr, reconnect = 1)
 		self.hash_cache = None
 		self._wake_r, self._wake_w = os.pipe()
-		self.record = set()
+		self.pending_rec = OrderedDict()
+		self.completed_rec = OrderedDict()
 		self.reload = False
 		self.clear = False
 		self.quit = False
@@ -606,30 +634,57 @@ class TranscriptionServer(FcgiServer):
 		self._wake()
 
 
-	# returns the pending media as doc-root-relative URL paths with a leading
-	# '/', e.g. "/live/out12.flv"; clients feed these straight into
+	# returns the pending and completed media as doc-root-relative URL paths with a
+	# leading '/', e.g. "/live/out12.flv"; clients feed these straight into
 	# urljoin() / PUT / POST
 	def get_media_list(self, doc_root):
-		result = []
-		for path in self.record:
-			rel_path = get_relative_path(path, doc_root)
-			if rel_path:
-				result.append('/' + rel_path)
-		return result
+		def make_list(rec):
+			result = []
+			for path in rec.keys():
+				rel_path = get_relative_path(path, doc_root)
+				if rel_path:
+					result.append('/' + rel_path)
+			return result
+
+		return (make_list(rec) for rec in (self.pending_rec, self.completed_rec))
 
 
 	# expects absolute normalized path
 	def add_media_file(self, path):
-		self.record.add(path)
+		if self.done_media_file(path):
+			return True
+
 		if self.hash_cache is not None:
-			self.hash_cache.push(path)
+			if not self.hash_cache.push(path):
+				return False
+
+		self.pending_rec[path] = True
+		self.pending_rec.move_to_end(path)
+		self.completed_rec.pop(path, None)
+		return True
+
+
+	# expects absolute normalized path
+	def done_media_file(self, path):
+		if not os.access(path + ".srt", os.F_OK):
+			return False
+
+		self.completed_rec[path] = True
+		self.completed_rec.move_to_end(path)
+		self.pending_rec.pop(path, None)
+		if self.hash_cache is not None:
+			self.hash_cache.drop(path)
+		return True
 
 
 	# expects absolute normalized path
 	def del_media_file(self, path):
-		self.record.discard(path)
+		self.completed_rec.pop(path, None)
+		self.pending_rec.pop(path, None)
 		if self.hash_cache is not None:
-			self.hash_cache.drop(path)
+			if not self.hash_cache.drop(path):
+				return False
+		return True
 
 
 	def handle_message(self):

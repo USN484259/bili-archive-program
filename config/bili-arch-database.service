@@ -1,0 +1,14 @@
+[Unit]
+Description=bili-arch video database service
+After=bili-arch-messaging.service
+# Requires=bili-arch-messaging.service
+
+[Service]
+Type=simple
+Environment=BILI_ARCH_MSG_ADDR=/srv/http/tmp/messaging.socket
+WorkingDirectory=/srv/http/code
+ExecStart=/usr/bin/python3 database_daemon.py -v -r /path/to/bili-arch
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

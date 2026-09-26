@@ -13,6 +13,10 @@ export function make_player_url(path) {
 	return config.player_url + "?path=" + path;
 }
 
+export function make_srt_viewer_url(path) {
+	return config.srt_viewer_url + "?path=" + path;
+}
+
 export function make_video_url(obj, path) {
 	obj.href = config.video_page_url + "?path=" + path;
 	if (window.top !== window.self) {

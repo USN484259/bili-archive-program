@@ -79,6 +79,15 @@ function add_parent_entry(tbody_elem, parent_path) {
 	}
 }
 
+function add_action(container, name, url = null) {
+		let a_elem = document.createElement("a");
+		if (url !== null) {
+			a_elem.setAttribute("href", url);
+		}
+		a_elem.append(name);
+		container.append(a_elem);
+		return a_elem;
+}
 
 function add_new_entry(tbody_elem, path, entry, index) {
 	// let tr_elem = document.createElement("tr");
@@ -111,21 +120,14 @@ function add_new_entry(tbody_elem, path, entry, index) {
 	// action
 	let action_elem = document.createElement("td");
 	if (name.endsWith(".zip")) {
-		let zip_elem = document.createElement("a")
-		let zip_url = url + "/index.html";
-		zip_elem.setAttribute("href", zip_url);
-		zip_elem.append("browse");
-		action_elem.append(zip_elem);
+		add_action(action_elem, "browse", url + "/index.html");
 	} else if (name.toLowerCase().startsWith("bv") && name.endsWith('/')) {
-		let bv_elem = document.createElement("a");
+		let bv_elem = add_action(action_elem, "play");
 		util.make_video_url(bv_elem, url);
-		bv_elem.append("play");
-		action_elem.append(bv_elem);
 	} else if (name.endsWith(".flv") || name.endsWith(".m3u8")) {
-		let player_elem = document.createElement("a");
-		player_elem.setAttribute("href", util.make_player_url(url));
-		player_elem.append("play");
-		action_elem.append(player_elem);
+		add_action(action_elem, "play", util.make_player_url(url));
+	} else if (name.endsWith(".srt")) {
+		add_action(action_elem, "view", util.make_srt_viewer_url(url));
 	}
 
 	tr_elem.append(name_elem, size_elem, mtime_elem, action_elem);

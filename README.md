@@ -60,6 +60,7 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 + live_danmaku.html	显示直播间实时弹幕，使用live_rec.py转发的弹幕信息
 + user_page.html	显示用户信息和动态
 + video_search.html	检索视频信息数据库
++ srt_viewer.html	SRT字幕浏览
 
 ## 依赖表
 
@@ -109,6 +110,7 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 |	live_danmaku.html	|	any	|	M		|			|			|
 |	user_page.html		|	any	|	M		|			|			|
 |	video_search.html	|	any	|	M		|			|			|
+|	srt_viewer.html		|	any	|	M		|			|			|
 
 ### 桌面应用
 
@@ -131,7 +133,7 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 + `fops.locked_path` 使用 `flock(2)` 锁定文件
 + 使用 `AF_UNIX` `SOCK_SEQPACKET` 进行本地通信
 + 使用 `signal(7)` 信号退出服务或触发特定操作
-+ 使用平台特定API如 `epoll(7)` `timerfd_create(2)`
++ 使用平台特定API如 `inotify(7)` `epoll(7)` `timerfd_create(2)`
 + 部署方案依赖`systemd`，使用了 *symbolic link*, *tmpfs*, *bind mount*
 
 
@@ -156,6 +158,17 @@ vim $HOME/.config/systemd/user/bili-arch-monitor.service	# 修改相关路径
 sudo loginctl enable-linger 1000	# your uid
 systemctl --user daemon-reload
 systemctl --user enable --now bili-arch-monitor.service
+```
+
+### 视频数据库自动更新
+
+```sh
+mkdir -p $HOME/.config/systemd/user/
+cp config/bili-arch-database.service $HOME/.config/systemd/user/
+vim $HOME/.config/systemd/user/bili-arch-database.service	# 修改相关路径
+sudo loginctl enable-linger 1000	# your uid
+systemctl --user daemon-reload
+systemctl --user enable --now bili-arch-database.service
 ```
 
 ### http 服务
@@ -297,7 +310,7 @@ python desktop/danmaku_reaction.py -u $HOME/bili-credential.txt config/danmaku.t
 + [NDJSON](https://github.com/ndjson/ndjson-spec) A standard for delimiting JSON in stream protocols.
 + [TOML](https://toml.io) Tom's Obvious Minimal Language. A config file format for humans.
 + [btrfs](https://btrfs.wiki.kernel.org) is a modern copy on write (COW) filesystem for Linux aimed at implementing advanced features while also focusing on fault tolerance, repair and easy administration.
-
++ [Whisper](https://github.com/openai/whisper) Robust Speech Recognition via Large-Scale Weak Supervision
 
 ### About `ssl` module safety on `fork(2)`
 
@@ -317,7 +330,7 @@ python desktop/danmaku_reaction.py -u $HOME/bili-credential.txt config/danmaku.t
 
 + As a result, protecting `ssl` module against `fork(2)` is considered unnecessary and is not implemented in this project.
 
-### About A.I. models and agents involved
+### About A.I. models and harnesses involved
 
 Some code of the project is written with the assistance of AI. See comments in each file for more info. Thanks for their great work !
 + [Copilot](https://github.com/copilot) GPT 4.1 and various models in *auto* mode

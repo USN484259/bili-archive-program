@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<!-- This file is mostly written by DeepSeek (web) -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SRT Viewer</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            margin: 1rem;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            max-width: 1200px;
+        }
+        th, td {
+            border: 1px solid #ccc;
+            padding: 6px 8px;
+            vertical-align: top;
+            text-align: left;
+        }
+        th {
+            background: #f0f0f0;
+            font-weight: 600;
+        }
+        tbody tr:nth-child(odd) {
+            background-color: #cccccc;
+        }
+        tbody tr:nth-child(even) {
+            background-color: #eeeeee;
+        }
+        .timestamp {
+            white-space: nowrap;
+            font-family: monospace;
+        }
+        .error {
+            color: #b00;
+            font-weight: bold;
+        }
+        #loading {
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+
+<h1>SRT Viewer</h1>
+<div id="loading">Loading…</div>
+<div id="error" class="error"></div>
+<table id="srt-table" style="display:none;">
+    <thead>
+        <tr>
+            <th>Timestamp</th>
+            <th>Text</th>
+        </tr>
+    </thead>
+    <tbody id="srt-body"></tbody>
+</table>
+
+<script>
+(function() {
+    const params = new URLSearchParams(window.location.search);
+    const path = params.get('path');
+    const loadingEl = document.getElementById('loading');
+    const errorEl = document.getElementById('error');
+    const tableEl = document.getElementById('srt-table');
+    const tbodyEl = document.getElementById('srt-body');
+
+    if (!path) {
+        loadingEl.style.display = 'none';
+        errorEl.textContent = 'Missing "path" query parameter. Example: ?path=/path/to/file.srt';
+        return;
+    }
+
+    // Escape HTML to prevent XSS when inserting text
+    function escapeHtml(str) {
+        return str
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;')
+            .replace(/\n/g, '<br>');
+    }
+
+    function formatTimestamp(ts_str) {
+        return ts_str.replace(/,/g, '.');
+    }
+
+    // Parse SRT content into an array of {timestamp, text}
+    function parseSRT(text) {
+        const blocks = text.trim().split(/\r?\n\r?\n/);
+        const entries = [];
+        for (const block of blocks) {
+            const lines = block.split(/\r?\n/).map(l => l.trim()).filter(l => l !== '');
+            if (lines.length < 2) continue; // not a valid block
+            // lines[0] = index, lines[1] = timestamp, lines[2..] = text
+            const timestamps = lines[1].split(/--[>]/).map(l => formatTimestamp(l.trim()));
+            const textLines = lines.slice(2);
+            const text = textLines.join('\n');
+            entries.push({ timestamps, text });
+        }
+        return entries;
+    }
+
+    fetch(path)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status} – ${response.statusText}`);
+            }
+            return response.text();
+        })
+        .then(srtText => {
+            const entries = parseSRT(srtText);
+            if (entries.length === 0) {
+                throw new Error('No valid SRT entries found.');
+            }
+            // Build table rows
+            const fragment = document.createDocumentFragment();
+            for (const entry of entries) {
+                const tr = document.createElement('tr');
+                const tdTime = document.createElement('td');
+                tdTime.className = 'timestamp';
+                tdTime.textContent = entry.timestamps[0];
+                const tdText = document.createElement('td');
+                tdText.innerHTML = escapeHtml(entry.text);
+                tr.appendChild(tdTime);
+                tr.appendChild(tdText);
+                fragment.appendChild(tr);
+            }
+            tbodyEl.innerHTML = '';
+            tbodyEl.appendChild(fragment);
+            loadingEl.style.display = 'none';
+            tableEl.style.display = 'table';
+        })
+        .catch(err => {
+            loadingEl.style.display = 'none';
+            errorEl.textContent = 'Error: ' + err.message;
+        });
+})();
+</script>
+
+</body>
+</html>

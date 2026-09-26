@@ -54,6 +54,7 @@ import sys
 sys.path[0] = os.getcwd()
 
 import re
+import json
 import time
 import struct
 import shutil
@@ -150,16 +151,21 @@ def save_fallback(rel_name, srt_content):
 
 # ffmpeg pre-process
 
-def spawn_ffmpeg(bin = None):
+def spawn_ffmpeg(show_progress = True):
 	cmd = [
-		bin or ffmpeg_bin or "ffmpeg",
+		ffmpeg_bin,
 		"-hide_banner", "-nostats",
+	]
+	if not show_progress:
+		cmd += ("-loglevel", "error")
+
+	cmd += (
 		"-i", "-",
 		"-vn", "-ac", "1", "-ar", "16000",
 		"-f", "s16le",
 		"-flush_packets", "1",
 		"pipe:1",
-	]
+	)
 	proc = subprocess.Popen(cmd, stdin = subprocess.PIPE, stdout = subprocess.PIPE, bufsize = 0)
 	logger.debug("spawned ffmpeg as %d", proc.pid)
 	return proc
@@ -203,13 +209,13 @@ class WavChunkProducer:
 	ffmpeg (stdout pipe fills -> ffmpeg blocks -> feeder stops reading the
 	source)."""
 	read_size = 0x10000
-	def __init__(self, source, chunk_time_ms):
+	def __init__(self, source, chunk_time_ms, /, show_progress = True):
 		self.chunk_time_ms = chunk_time_ms
 		self.buffer = bytearray()
 		self.eof = False
 		self.quit = False
 		self.error = None
-		self.proc = spawn_ffmpeg()
+		self.proc = spawn_ffmpeg(show_progress)
 		self.th = threading.Thread(target = self.feed_worker, args = (source, ))
 		self.th.start()
 
@@ -287,8 +293,9 @@ class Transcriber:
 		lambda m, i, base: ((int(m[i+0]) * 60 + int(m[i+1])) * 60 + int(m[i+2])) * 1000 + int(m[i+3]) + base
 	)
 
-	def __init__(self, spawner, base_offset_ms):
+	def __init__(self, spawner, base_offset_ms, /, show_progress = True):
 		self.base_offset_ms = base_offset_ms
+		self.show_progress = show_progress
 		self.proc = spawner()
 		self.output = []
 		self.line_buffer = ""
@@ -354,7 +361,8 @@ class Transcriber:
 			return
 		# raw whisper segment lines streamed at INFO double as live progress
 		# for interactive use
-		logger.info(line)
+		if self.show_progress:
+			logger.info(line)
 		line_match = self.output_pattern.fullmatch(line)
 		if not line_match:
 			logger.warning("cannot parse line:\t%s", line)
@@ -525,7 +533,7 @@ class LocalFileReader:
 
 # public interface
 # chunk time in seconds
-def transcribe(source, whisper, chunk_time):
+def transcribe(source, whisper, chunk_time, /, show_progress = True):
 	"""Transcribe `source` in ~chunk_time-second chunks and return the
 	combined [(start_ms, stop_ms, text), ...] segments.
 
@@ -534,7 +542,7 @@ def transcribe(source, whisper, chunk_time):
 	point where the repeated block started), so whisper's per-chunk
 	0-based timestamps line up with the media timeline."""
 	chunk_time_ms = chunk_time * 1000
-	producer = WavChunkProducer(source, chunk_time_ms)
+	producer = WavChunkProducer(source, chunk_time_ms, show_progress)
 	try:
 		time_offset_ms = 0
 		results = []
@@ -543,7 +551,7 @@ def transcribe(source, whisper, chunk_time):
 			if not chunk:
 				break
 			logger.debug("transcribing chunk at %d ms, %d bytes", time_offset_ms, len(chunk))
-			transcriber = Transcriber(whisper, time_offset_ms)
+			transcriber = Transcriber(whisper, time_offset_ms, show_progress)
 			try:
 				transcriber.run(chunk)
 				time_offset_ms += chunk_time_ms
@@ -589,7 +597,15 @@ def put_srt(sess, srt_url, params, srt_content, retry):
 	return resp.status_code
 
 
+def post_api(sess, api_url, op, *media_url):
+	try:
+		sess.post(api_url, json = {op: media_url})
+	except httpx.HTTPError as e:
+		logger.warning("cannot %s %s from list: %s", op, " ".join(media_url), str(e))
+
+
 def http_main(args, msg_client):
+	summary = {}
 	with httpx.Client(timeout = httpx.Timeout(120, connect = 10)) as sess:
 		api_url = args.url
 		resp = sess.get(api_url)
@@ -605,7 +621,7 @@ def http_main(args, msg_client):
 		else:
 			hash_name = hash_methods and hash_methods[0] or None
 
-		media_list = info.get("list", [])
+		media_list = info.get("pending", [])
 		# the server may report hashing_speed as None (e.g. no hashes configured
 		# or the worker has not measured yet); fall back to a sane default used
 		# only for sizing the PUT 503 retry budget below
@@ -623,13 +639,19 @@ def http_main(args, msg_client):
 
 				logger.info("transcribing %s", media_url)
 				with HttpReader(sess, urljoin(api_url, media_url), hash_name) as source:
-					segments = transcribe(source, whisper, args.chunk_time)
+					segments = transcribe(source, whisper, args.chunk_time, show_progress = (not args.no_progress))
 					file_size = source.get_size()
 					hash_value = source.get_hash()
 
 				srt_content = convert_to_srt(segments)
 				logger.info("%s done with %d lines", media_url, len(segments))
 				logger.debug("size %d, %s %s", file_size, hash_name, hash_value)
+
+				if not segments:
+					logger.warning("empty transcription for %s, skipped", media_url)
+					post_api(sess, api_url, "del", media_url)
+					summary[media_url] = "(empty)"
+					continue
 
 				params = {}
 				retries = put_retry_min
@@ -648,10 +670,7 @@ def http_main(args, msg_client):
 				resp_code = put_srt(sess, urljoin(api_url, srt_url), params, srt_content, retries)
 				if resp_code == 201:
 					logger.info("PUT ok %d for %s, removing from list", resp_code, media_url)
-					try:
-						sess.post(api_url, json = {"del": [media_url]})
-					except httpx.HTTPError as e:
-						logger.warning("cannot remove %s from list: %s", media_url, str(e))
+					post_api(sess, api_url, "done", media_url)
 					path = srt_url
 				else:
 					logger.error("PUT %s failed with %d", srt_url, resp_code)
@@ -662,15 +681,21 @@ def http_main(args, msg_client):
 						"server":	api_url,
 						"media":	media_url,
 						"status":	resp_code,
-						"srt_path":		path,
+						"srt_path":	path,
 					})
+
+				summary[media_url] = path
+
 			except Exception:
 				logger.exception("exception in transcribing %s", media_url)
+
+	return summary
 
 
 # local mode
 
 def local_main(args, msg_client):
+	summary = {}
 	whisper = WhisperCli(args.model, args.vad, args.no_gpu)
 	for path in args.files:
 		if not os.path.isfile(path):
@@ -679,7 +704,7 @@ def local_main(args, msg_client):
 		logger.info("transcribing %s", path)
 		try:
 			with LocalFileReader(path) as source:
-				segments = transcribe(source, whisper, args.chunk_time)
+				segments = transcribe(source, whisper, args.chunk_time, show_progress = (not args.no_progress))
 			srt_content = convert_to_srt(segments)
 			srt_path = path + ".srt"      # e.g. a.flv -> a.flv.srt
 			try:
@@ -695,8 +720,12 @@ def local_main(args, msg_client):
 					"srt_path":	srt_path,
 				})
 
+			summary[path] = srt_path
+
 		except Exception:
 			logger.exception("exception in transcribing %s", path)
+
+	return summary
 
 
 # main entry
@@ -725,11 +754,14 @@ def main(args):
 			logger.warning("running server mode, ignoring local files")
 		if httpx is None:
 			raise RuntimeError("missing httpx library")
-		http_main(args, msg_client)
+		summary = http_main(args, msg_client)
 	elif args.files:
-		local_main(args, msg_client)
+		summary = local_main(args, msg_client)
 	else:
 		raise ValueError("specify --url (server mode) or local files")
+
+	logger.info("processed %d media", len(summary))
+	json.dump(summary, sys.stdout, indent = '\t', ensure_ascii = False)
 
 
 if __name__ == "__main__":
@@ -740,8 +772,9 @@ if __name__ == "__main__":
 	parser.add_argument("--vad", help = "VAD model path (ggml-silero)")
 	parser.add_argument("--whisper", help = "whisper-cli binary path")
 	parser.add_argument("--ffmpeg", help = "ffmpeg binary path")
-	parser.add_argument("--no-gpu", action = "store_true", help = "disable GPU and use all CPU threads")
-	parser.add_argument("-t", "--chunk-time", type = int, default = 600, help = "audio chunk length in seconds (default 600)")
+	parser.add_argument("-ng", "--no-gpu", action = "store_true", help = "disable GPU and use all CPU threads")
+	parser.add_argument("-np", "--no-progress", action = "store_true", help = "do not print progress")
+	parser.add_argument("-t", "--chunk-time", type = int, default = 1800, help = "audio chunk length in seconds (default 1800)")
 	parser.add_argument("-r", "--url", help = "server API URL (server mode)")
 	parser.add_argument("--hash", help = "force hash method for server PUT verification")
 	parser.add_argument("--fallback", help = "fallback folder to save SRT files when PUT fails")

@@ -19,14 +19,12 @@ recv_bufsize = 0x10000
 retry_count = 1
 ms2ns = 1000*1000
 activate = hasattr(select, "epoll") and hasattr(socket, "SOCK_SEQPACKET")
-if activate:
-	_epoll_mask = select.EPOLLIN | select.EPOLLRDHUP | select.EPOLLONESHOT
-else:
-	_epoll_mask = 0
+
 
 # static objects
 
 logger = logging.getLogger("bili_arch.messaging")
+sctp_url_pattern = re.compile(r"^sctp://([^/]+?):(\d+)$")
 topic_pattern = re.compile(r"\w+")
 msg_pattern = re.compile(r"^([0-9A-Fa-f]{8}) (\S+) (\S+)$")
 msg_handler = {
@@ -46,7 +44,7 @@ class BaseServer:
 			self.socket = socket
 			self.name = name
 
-	epoll_mask = _epoll_mask
+	epoll_mask = activate and (select.EPOLLIN | select.EPOLLRDHUP | select.EPOLLONESHOT)
 
 	def __init__(self, *args, **kwargs):
 		self.conn = self.on_create(*args, **kwargs)
@@ -86,12 +84,13 @@ class BaseServer:
 
 	def on_connected(self, sock, addr):
 		name = addr
-		# try to get peer name
 		try:
-			data = sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 0x20)
-			# assume pid_t is signed int
-			pid = struct.unpack_from("=i", data)[0]
-			name = str(pid)
+			if not isinstance(sock.getsockname(), tuple):
+				# try to get peer name on UNIX socket
+				data = sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 0x20)
+				# assume pid_t is signed int
+				pid = struct.unpack_from("=i", data)[0]
+				name = str(pid)
 		except Exception as e:
 			logger.debug("cannot find peer name %s", str(e))
 
@@ -219,12 +218,21 @@ class BaseServer:
 					self.drop_client(fd)
 
 
+def parse_sctp_url(url):
+	sctp_match = sctp_url_pattern.fullmatch(url)
+	if sctp_match:
+		return sctp_match[1], int(sctp_match[2])
+	else:
+		return None, None
+
+
 def serve_unix(path, mode):
 	logger.info("opening unix socket %s", path)
 	return create_unix_socket(path, sock_type = socket.SOCK_SEQPACKET, mode = mode)
 
+
 def serve_sctp(addr, port):
-	logger.info("connecting sctp %s port %d", path, port)
+	logger.info("connecting sctp %s port %d", addr, port)
 	sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_SCTP)
 	try:
 		sock.bind((addr, port))
@@ -234,6 +242,7 @@ def serve_sctp(addr, port):
 		sock.close()
 		raise
 
+
 def connect_unix(path):
 	sock = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
 	try:
@@ -242,6 +251,7 @@ def connect_unix(path):
 	except:
 		sock.close()
 		raise
+
 
 def connect_sctp(addr, port):
 	sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_SCTP)
@@ -255,8 +265,12 @@ def connect_sctp(addr, port):
 
 class MessagingServer(BaseServer):
 	# override
-	def on_create(self, sock_path, *args):
-		return serve_unix(sock_path, args and args[0] or 0o600)
+	def on_create(self, path, *args):
+		(addr, port) = parse_sctp_url(path)
+		if addr and port:
+			return serve_sctp(addr, port)
+		else:
+			return serve_unix(path, args and args[0] or 0o600)
 
 	# override
 	def on_connected(self, *args):
@@ -363,17 +377,22 @@ class BaseClient:
 
 
 class MessagingClient:
-	epoll_mask = _epoll_mask
+	epoll_mask = activate and (select.EPOLLIN | select.EPOLLRDHUP)
 
 	class Client(BaseClient):
 		# override
 		def on_create(self, path, *args):
-			return connect_unix(path)
+			(addr, port) = parse_sctp_url(path)
+			if addr and port:
+				return connect_sctp(addr, port)
+			else:
+				return connect_unix(path)
+
 
 	def __init__(self, addr = None, /, allow_dummy = True, *, reconnect = None):
 		self.msg_addr = addr or msg_env_addr
 		self.allow_dummy = allow_dummy
-		self.reconnect_interval = reconnect and int(reconnect)
+		self.reconnect_ms = reconnect and int(reconnect * 1000)
 		self.epoll = select.epoll()
 		self.timer = os.timerfd_create(time.CLOCK_MONOTONIC)
 		self.conn = None
@@ -388,6 +407,7 @@ class MessagingClient:
 		else:
 			raise ValueError("missing addr")
 
+
 	def check_connection(self):
 		if self.conn is not None:
 			return True
@@ -400,14 +420,13 @@ class MessagingClient:
 				if self.subscription:
 					self._do_subscribe()
 				self.on_connected()
-				if self.reconnect_interval:
+				if self.reconnect_ms:
 					os.timerfd_settime_ns(self.timer)
 				return True
 			except Exception as e:
 				logger.debug("cannot open %s: %s", self.msg_addr, str(e))
-				if self.reconnect_interval:
-					os.timerfd_settime_ns(self.timer, initial = self.reconnect_interval * ms2ns)
-					self.epoll.modify(self.timer, self.epoll_mask)
+				if self.reconnect_ms:
+					os.timerfd_settime_ns(self.timer, initial = self.reconnect_ms * ms2ns)
 
 				if not self.allow_dummy:
 					raise
@@ -537,8 +556,7 @@ class MessagingClient:
 			if not data:
 				if self.shutdown:
 					self.reconnect()
-				else:
-					self.epoll.modify(self.conn, self.epoll_mask)
+
 				return None, None
 
 			try:

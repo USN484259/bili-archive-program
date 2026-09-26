@@ -240,6 +240,8 @@ function renderResultsTable(data) {
 	for (const row of data) {
 		const tr = document.createElement("tr");
 		const coverTd = document.createElement("td");
+		const coverHref = document.createElement("a");
+		util.make_video_url(coverHref, video_root + row.bvid);
 		if (row.cover) {
 			const img = document.createElement("img");
 			img.src = video_root + row.bvid + '/' + row.cover;
@@ -247,14 +249,15 @@ function renderResultsTable(data) {
 			img.style.maxHeight = "80px";
 			img.setAttribute("loading", "lazy");
 			img.onerror = util.handle_legacy_cover_image;
-			coverTd.appendChild(img);
+			coverHref.appendChild(img);
 		}
+		coverTd.appendChild(coverHref);
 		tr.appendChild(coverTd);
 		const titleTd = document.createElement("td");
-		const hrefTd = document.createElement("a");
-		util.make_video_url(hrefTd, video_root + row.bvid)
-		hrefTd.textContent = row.title;
-		titleTd.appendChild(hrefTd);
+		const titleHref = document.createElement("a");
+		util.make_video_url(titleHref, video_root + row.bvid);
+		titleHref.textContent = row.title;
+		titleTd.appendChild(titleHref);
 		tr.appendChild(titleTd);
 		const authorTd = document.createElement("td");
 		authorTd.textContent = row.uname;
@@ -270,7 +273,7 @@ function renderResultsTable(data) {
 		tr.appendChild(mtimeTd);
 
 		tr.addEventListener("click", (e) => {
-			if (e.target !== hrefTd)
+			if (e.target.closest("a") === null)
 				handleRowClick(tr, row.bvid);
 		});
 		if (selectedBvidSet.has(row.bvid)) {

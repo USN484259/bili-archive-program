@@ -39,10 +39,10 @@ logger = logging.getLogger("bili_arch.database_daemon")
 
 
 class DatabaseDaemon:
-	def __init__(self, video_root, database, /, msg_addr = None, *, allow_dummy = True, watch_paths = None):
+	def __init__(self, video_root, database, /, msg_addr = None, *, watch_paths = None):
 		self.video_root = video_root
 		self.database = VideoDatabaseManager(video_root, database)
-		self.msg_client = MessagingClient(msg_addr, allow_dummy = allow_dummy)
+		self.msg_client = MessagingClient(msg_addr, reconnect = 1)
 		self.queue = SimpleQueue()
 		self.watch_paths = set()
 		self.worker = None
@@ -202,7 +202,7 @@ class DatabaseDaemon:
 		self.worker.start()
 
 		while not self.quitting:
-			for ev, fd in self.poll.poll():
+			for fd, ev in self.poll.poll():
 				if fd == self._wake_r:
 					self.handle_event()
 				else:
@@ -211,7 +211,11 @@ class DatabaseDaemon:
 
 def main(args):
 	video_path = args.dir or runtime.subdir("video")
-	with DatabaseDaemon(video_path, args.database, args.msg_addr, watch_paths = args.watch) as daemon:
+	db_path = args.database or os.path.join(runtime.subdir("database"), "video.db")
+	if not (video_path and db_path):
+		raise RuntimeError("missing video or database path: %s %s", video_path, db_path)
+
+	with DatabaseDaemon(video_path, db_path, args.msg_addr, watch_paths = args.watch) as daemon:
 		daemon.run()
 
 
@@ -220,7 +224,7 @@ if __name__ == "__main__":
 
 	args = runtime.parse_args(("dir", "messaging"), (
 		(("--watch", ), {"nargs": '*'}),
-		(("database", ), {}),
+		(("database", ), {"nargs": '?'}),
 	))
 
 	main(args)

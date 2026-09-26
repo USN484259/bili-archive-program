@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+# This file is written with the assistance of opencode-deepseek-v4-flash
+
 import os
 import sys
 sys.path[0] = os.getcwd()
@@ -245,11 +247,22 @@ class VideoDatabase:
 
 			cond_list.append("( %s )" % query_obj[1].join(sub_cond))
 
-		sql = "SELECT * FROM " + view_table_name
-		if cond_list:
-			sql += " WHERE " + " AND ".join(cond_list)
+		# search_view has one row per video-author pair. Rank per video and
+		# keep the ranked row, so the author columns (uid/uname/role) are the
+		# "primary" author: role 'UP主' first (the major creator), then the
+		# lowest uid for a deterministic fallback (covers the single-author
+		# and the no-UP主 cases). When an author condition (uname/uid) is part
+		# of the search, the WHERE clause already keeps only author rows that
+		# match, so the ranked row is always a matched author.
+		author_priority = "CASE WHEN role = 'UP主' THEN 0 ELSE 1 END, uid"
 
-		sql += " GROUP BY bvid"
+		from_sql = " FROM " + view_table_name
+		if cond_list:
+			from_sql += " WHERE " + " AND ".join(cond_list)
+
+		# one result row per video: take only the highest-ranked author row
+		sql = "SELECT * FROM ( SELECT *, ROW_NUMBER() OVER (PARTITION BY bvid ORDER BY %s) AS rn %s ) WHERE rn = 1" % (author_priority, from_sql)
+		count_sql = "SELECT COUNT(DISTINCT bvid) AS count" + from_sql
 
 		logger.debug(sql)
 		logger.debug(arg_list)
@@ -258,7 +271,7 @@ class VideoDatabase:
 		try:
 			cursor.arraysize = 0x40
 			cursor.execute("BEGIN")
-			cursor.execute("SELECT COUNT(*) as count FROM ( %s )" % sql, arg_list)
+			cursor.execute(count_sql, arg_list)
 			count = cursor.fetchone()["count"]
 
 			sql += " ORDER BY %s %s" % (order_key, order_dir)
@@ -339,11 +352,11 @@ class VideoDatabaseManager(VideoDatabase):
 				cursor.execute("SELECT root FROM %s" % meta_table_name)
 				recorded_root = cursor.fetchone()["root"]
 				if recorded_root != self.video_root:
-					err_msg = "video root mismatch: %s\t%s", recorded_root, self.video_root
+					err_msg = "video root mismatch: %s\t%s" % (recorded_root, self.video_root)
 					logger.warning(err_msg)
 					if update_path:
 						logger.warning("update video root in database")
-						cursor.execute("UPDATE TABLE %s SET root = ?" % meta_table_name, (self.video_root, ))
+						cursor.execute("UPDATE %s SET root = ?" % meta_table_name, (self.video_root, ))
 					else:
 						raise Exception(err_msg)
 
@@ -623,8 +636,9 @@ class VideoDatabaseManager(VideoDatabase):
 
 
 def main(args):
-	database = VideoDatabaseManager(args.dir, args.database)
-	database.walk()
+	database = VideoDatabaseManager(args.dir, args.database, update_path = args.force)
+	if not args.no_walk:
+		database.walk()
 
 
 if __name__ == "__main__":
@@ -632,6 +646,8 @@ if __name__ == "__main__":
 	parser = argparse.ArgumentParser()
 	parser.add_argument("-d", "--dir", required = True)
 	parser.add_argument("-v", "--verbose", action = "count", default = 0)
+	parser.add_argument("-f", "--force", action = "store_true", help = "force open even the path mismatch, and update the path in db")
+	parser.add_argument("-n", "--no-walk", action = "store_true")
 	parser.add_argument("database")
 
 	args = parser.parse_args()
