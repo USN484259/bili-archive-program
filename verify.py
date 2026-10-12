@@ -59,18 +59,18 @@ def verify_media(path, part_duration, duration_tolerance):
 			media_type = media.get("codec_type")
 			media_duration = media.get("duration", None)
 			if not media_duration:
-				logger.warning("missing duration in stream-info, use format-info")
+				logger.verbose("missing duration in stream-info, use format-info")
 				media_duration = media_info.get("format").get("duration")
 			media_duration = float(media_duration)
 
-			logger.debug("stream %d, type %s, duration %.1f/%.1f", media.get("index"), media_type, media_duration or math.nan, part_duration or math.nan)
+			logger.verbose("stream %d, type %s, duration %.1f/%.1f", media.get("index"), media_type, media_duration or math.nan, part_duration or math.nan)
 
 			if not duration_tolerance:
-				logger.debug("skip duration check")
+				logger.verbose("skip duration check")
 			elif not part_duration:
-				logger.warning("unknown duration, skip")
+				logger.verbose("unknown duration, skip")
 			elif abs(part_duration - media_duration) >= duration_tolerance:
-				logger.warning("media duration mismatch, %f/%f", part_duration, media_duration)
+				logger.verbose("media duration mismatch, %f/%f", part_duration, media_duration)
 				return 0, 0
 
 			if media_type == "video":
@@ -86,7 +86,7 @@ def verify_media(path, part_duration, duration_tolerance):
 
 def verify_cover(path, name, scan_files):
 	cover_path = os.path.join(path, name)
-	logger.debug("checking cover %s", cover_path)
+	logger.verbose("checking cover %s", cover_path)
 	if not os.path.isfile(cover_path):
 		return False
 
@@ -94,7 +94,7 @@ def verify_cover(path, name, scan_files):
 		media_info = ffprobe(cover_path)
 		try:
 			codec = media_info.get("streams")[0].get("codec_name")
-			logger.debug("cover codec %s", codec)
+			logger.verbose("cover codec %s", codec)
 			if codec not in ["mjpeg", "png", "gif", "bmp"]:
 				return False
 
@@ -102,13 +102,13 @@ def verify_cover(path, name, scan_files):
 			logger.exception("exception on verify cover for %s", cover_path)
 			return False
 
-	logger.debug("found cover %s", name)
+	logger.verbose("found cover %s", name)
 	return True
 
 
 def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, duration_tolerance = None):
 	if scan_files and not ffprobe_bin:
-		logger.warning("ffprobe binary not found")
+		logger.notice("ffprobe binary not found")
 		scan_files = False
 
 	result = {
@@ -116,9 +116,9 @@ def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, du
 		"parts" : {}
 	}
 	try:
-		logger.debug("verify video %s, scan %s, tolerance %.1f", bv_root, scan_files, duration_tolerance or math.nan)
+		logger.verbose("verify video %s, scan %s, tolerance %.1f", bv_root, scan_files, duration_tolerance or math.nan)
 		if ignore:
-			logger.debug("ignore %s", ignore)
+			logger.verbose("ignore %s", ignore)
 		logger.debug("loading video info")
 		with open(os.path.join(bv_root, "info.json"), 'r') as f:
 			bv_info = json.load(f)
@@ -132,7 +132,7 @@ def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, du
 			if cover_name and verify_cover(bv_root, cover_name, scan_files):
 				result["cover"] = True
 			else:
-				logger.warning("cover not found")
+				logger.verbose("cover not found")
 
 		if 'P' in ignore:
 			part_list = []
@@ -142,7 +142,7 @@ def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, du
 
 			part_list = bv_info.get("interactive").get("nodes")
 
-			logger.debug("interactive video, checking graph")
+			logger.verbose("interactive video, checking graph")
 			# TODO scan DOT file
 			result["graph"] = os.path.isfile(os.path.join(bv_root, "graph.dot"))
 		else:
@@ -154,7 +154,7 @@ def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, du
 		if 'S' not in ignore:
 			subtitle_table = bv_info.get("subtitle")
 			if not subtitle_table:
-				logger.warning("missing subtitles for %s", bv_info.get("bvid"))
+				logger.verbose("missing subtitles for %s", bv_info.get("bvid"))
 
 		for part in part_list:
 			cid = str(part.get("cid", ""))
@@ -174,13 +174,13 @@ def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, du
 
 			if subtitle_table:
 				subtitle = subtitle_table.get(cid, {}).get("subtitles", [])
-				logger.debug("subtitle count %d", len(subtitle))
+				logger.verbose("subtitle count %d", len(subtitle))
 				if len(subtitle) > 0:
 					part_stat['S'] = 0
 
 			part_root = os.path.join(bv_root, cid)
 			if not os.path.isdir(part_root):
-				logger.debug("part dir not exist")
+				logger.info("part dir not exist")
 				continue
 
 			video_count = 0
@@ -188,7 +188,7 @@ def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, du
 			no_audio = False
 			no_video = False
 
-			logger.debug("checking %s in %s", cid, part_root)
+			logger.verbose("checking %s in %s", cid, part_root)
 			for filename in os.listdir(part_root):
 				logger.debug("file %s", filename)
 				ext = os.path.splitext(filename)[1].lower()
@@ -198,12 +198,12 @@ def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, du
 					continue
 
 				if filename == default_names.novideo:
-					logger.info("found no-video stub")
+					logger.verbose("found no-video stub")
 					no_video = True
 					continue
 
 				if filename == default_names.noaudio:
-					logger.info("found no-audio stub")
+					logger.verbose("found no-audio stub")
 					no_audio = True
 					continue
 
@@ -214,17 +214,17 @@ def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, du
 							with open(os.path.join(part_root, filename), "r") as f:
 								xml_parser.parse(f)
 						except Exception:
-							logger.warning("unexpected XML format")
+							logger.verbose("unexpected XML format")
 							continue
 
-					logger.debug("found danmaku")
+					logger.verbose("found danmaku")
 					part_stat['D'] += 1
 					continue
 
 				if ext == ".json":
 					match = subtitle_pattern.fullmatch(filename)
 					if not match:
-						logger.warning("type: json (unknown)")
+						logger.verbose("type: json (unknown)")
 						continue
 
 					if 'S' not in ignore:
@@ -235,17 +235,17 @@ def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, du
 								with open(os.path.join(part_root, filename), "r") as f:
 									json.load(f)
 							except Exception:
-								logger.warning("unexpected JSON format")
+								logger.verbose("unexpected JSON format")
 								continue
 
-						logger.debug("found subtitle, lang %s", lan)
+						logger.verbose("found subtitle, lang %s", lan)
 						for i, sub in enumerate(subtitle):
 							if sub.get("lan") == lan:
 								del subtitle[i]
 								part_stat['S'] += 1
 								break
 						else:
-							logger.warning("subtitle not recorded %s", lan)
+							logger.verbose("subtitle not recorded %s", lan)
 
 					continue
 
@@ -257,10 +257,10 @@ def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, du
 					if scan_files:
 						vc, ac = verify_media(os.path.join(part_root, filename), part_duration, duration_tolerance)
 						if vc != 1 or ac != 0:
-							logger.warning("unexpected media streams")
+							logger.verbose("unexpected media streams")
 							continue
 
-					logger.debug("found video")
+					logger.verbose("found video")
 					video_count += 1
 					continue
 
@@ -269,10 +269,10 @@ def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, du
 					if scan_files:
 						vc, ac = verify_media(os.path.join(part_root, filename), part_duration, duration_tolerance)
 						if vc != 0 or ac != 1:
-							logger.warning("unexpected media streams")
+							logger.verbose("unexpected media streams")
 							continue
 
-					logger.debug("found audio")
+					logger.verbose("found audio")
 					audio_count += 1
 					continue
 
@@ -281,15 +281,15 @@ def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, du
 					if scan_files:
 						vc, ac = verify_media(os.path.join(part_root, filename), part_duration, duration_tolerance)
 						if vc != 1 or ac != 1:
-							logger.warning("unexpected media streams")
+							logger.verbose("unexpected media streams")
 							continue
 
-					logger.debug("found video & audio")
+					logger.verbose("found video & audio")
 					video_count += 1
 					audio_count += 1
 					continue
 
-				logger.debug("unknown type %s", ext)
+				logger.verbose("unknown type %s", ext)
 
 			logger.info("video_count %d, audio_count %d", video_count, audio_count)
 
@@ -299,7 +299,7 @@ def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, du
 				elif no_video:
 					del part_stat['V']
 				else:
-					logger.warning("missing video files")
+					logger.info("missing video files")
 
 			if 'A' not in ignore:
 				if audio_count > 0:
@@ -307,15 +307,15 @@ def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, du
 				elif no_audio:
 					del part_stat['A']
 				else:
-					logger.warning("missing audio files")
+					logger.info("missing audio files")
 
 			if 'D' not in ignore and not part_stat['D']:
-				logger.warning("missing danmaku file")
+				logger.info("missing danmaku file")
 
 			if not part_stat.get('S', True):
-				logger.warning("missing subtitle")
+				logger.info("missing subtitle")
 
-		logger.debug("verify done for %s", bv_info.get("bvid"))
+		logger.verbose("verify done for %s", bv_info.get("bvid"))
 		result["info"] = True
 	except Exception as e:
 		logger.exception("exception in verifing %s", bv_root)
@@ -340,10 +340,10 @@ def check_result(stat):
 def main(args):
 	video_root = args.dir or runtime.subdir("video")
 	if len(args.inputs) > 0:
-		logger.debug("%d BV on cmdline", len(args.inputs))
+		logger.verbose("%d BV on cmdline", len(args.inputs))
 		bv_list = args.inputs
 	else:
-		logger.debug("scan BV in %s", video_root)
+		logger.verbose("scan BV in %s", video_root)
 		bv_list = list_bv(video_root)
 
 	logger.info("BV count %d", len(bv_list))

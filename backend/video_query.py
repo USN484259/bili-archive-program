@@ -84,7 +84,7 @@ class VideoServer(FcgiServer):
 			self.db_map.move_to_end(db_path, last = True)
 			return db
 		except Exception as e:
-			logger.exception("")
+			logger.exception("cannot open database %s", db_path)
 			return None
 
 	def service_actions(self):

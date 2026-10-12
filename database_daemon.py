@@ -52,12 +52,12 @@ class DatabaseDaemon:
 		self.watch_paths.add(os.path.normpath(video_root))
 		for path in (watch_paths or ()):
 			self.watch_paths.add(os.path.normpath(path))
-
+		logger.debug("db %s, path %s, watching %s", database, video_root, ' '.join(self.watch_paths))
 		# self-pipe (POSIX) to wake the main loop from a signal handler
 		self._wake_r, self._wake_w = os.pipe()
 		os.set_blocking(self._wake_r, False)
 		os.set_blocking(self._wake_w, False)
-
+		logger.trace("pipe %d %d", self._wake_r, self._wake_w)
 		self.poll = select.poll()
 		self.poll.register(self._wake_r, select.POLLIN)
 		# fileno() is stable for the client even across reconnects, so it is
@@ -75,12 +75,14 @@ class DatabaseDaemon:
 
 
 	def _wake(self):
+		logger.debug("waking up, walk %s, quit %s", self.needs_walk, self.quitting)
 		with suppress(OSError):
 			os.write(self._wake_w, b"x")
 
 
 	def _schedule_task(self, task = "wakeup"):
 		size = self.queue.qsize()
+		logger.debug("queue %d, task %s", size, task)
 		if size >= QUEUE_MAX_SIZE:
 			logger.warning("queue full %d, dropping %s", size, str(task))
 		else:
@@ -107,6 +109,7 @@ class DatabaseDaemon:
 			# drain pending messages
 			while True:
 				topic, info = self.msg_client.recv(constants.topic.video)
+				logger.trace("%s: %s", topic, info)
 				if not topic:
 					break
 				if not isinstance(info, dict):
@@ -117,16 +120,17 @@ class DatabaseDaemon:
 					logger.warning("invalid video message: %s %s", str(path), str(bvid))
 					return
 				done = info.get("done")
-				logger.debug("video %s, path %s, done %s", bvid, path, str(done))
+				logger.verbose("video %s, path %s, done %s", bvid, path, str(done))
 				if not done or os.path.normpath(path) not in self.watch_paths:
 					return
-				logger.info("scheduling database update %s", bvid)
+				logger.verbose("scheduling database update %s", bvid)
 				self._schedule_task(bvid)
 		except Exception:
 			logger.exception("exception in handle_message")
 
 
 	def worker_func(self):
+		logger.debug("worker thread %d", threading.get_native_id())
 		# change this thread's IO priority to IDLE so database work stays out
 		# of the way of other IO
 		try:
@@ -134,7 +138,7 @@ class DatabaseDaemon:
 			proc = psutil.Process(threading.get_native_id())
 			proc.ionice(psutil.IOPRIO_CLASS_IDLE)
 		except Exception as e:
-			logger.warning("cannot set IO priority: %s", str(e))
+			logger.notice("cannot set IO priority: %s", str(e))
 
 		while not self.quitting:
 			item = self.queue.get()
@@ -143,24 +147,29 @@ class DatabaseDaemon:
 					break
 				elif self.needs_walk:
 					# running full walk and drop individual updates
+					logger.info("walking start")
 					with suppress(QueueEmpty):
-						while self.queue.get_nowait():
-							pass
+						while True:
+							obj = self.queue.get_nowait()
+							logger.debug("dropping %s", obj)
 					try:
 						self.database.walk()
+						logger.info("walking completed")
 					finally:
 						self.needs_walk = False
 				else:
 					bvid = item
-					logger.info("running database update %s", bvid)
+					logger.info("updating %s", bvid)
 					if self.database.update_video(bvid):
 						self.database.update_video_size(bvid)
 			except Exception as e:
 				logger.exception("exception on updating %s", item)
 
+		logger.debug("worker thread exit")
 
 
 	def close(self):
+		logger.verbose("closing")
 		self.quitting = True
 		self._schedule_task()
 		self._wake()
@@ -192,6 +201,7 @@ class DatabaseDaemon:
 
 
 	def run(self):
+		logger.debug("setting signal handlers")
 		signal.signal(signal.SIGUSR1, self.on_signal)
 		signal.signal(signal.SIGTERM, self.on_signal)
 		signal.signal(signal.SIGINT, self.on_signal)
@@ -203,6 +213,7 @@ class DatabaseDaemon:
 
 		while not self.quitting:
 			for fd, ev in self.poll.poll():
+				logger.trace("fd %d, ev %x", fd, ev)
 				if fd == self._wake_r:
 					self.handle_event()
 				else:
@@ -226,5 +237,5 @@ if __name__ == "__main__":
 		(("--watch", ), {"nargs": '*'}),
 		(("database", ), {"nargs": '?'}),
 	))
-
+	logger.trace(args)
 	main(args)

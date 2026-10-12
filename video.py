@@ -79,6 +79,7 @@ def find_best(info, prefer = "", reject = ""):
 	result = None
 	for v in info:
 		codec_name = codec_name_map[v.get("codecid")]
+		logger.debug("codec %s, id %d", codec_name, v.get("id"))
 		if codec_name in reject:
 			continue
 		if result and result.get("id") >= v.get("id"):
@@ -93,7 +94,7 @@ def find_best(info, prefer = "", reject = ""):
 		result["codec_name"] = codec_name
 
 	if result:
-		logger.debug("best: id %d, codec %s(%d)", result.get("id"), result.get("codec_name"), result.get("codecid"))
+		logger.verbose("best: id %d, codec %s(%d)", result.get("id"), result.get("codec_name"), result.get("codecid"))
 	return result
 
 
@@ -142,7 +143,7 @@ async def fetch_interactive_info(sess, info, stall = None):
 
 
 async def fetch_info(sess, bv, /, stall = None):
-	logger.debug("fetch video info %s", bv)
+	logger.verbose("fetch video info %s", bv)
 	stall and await stall()
 	info = await get_bv_info(sess, bv)
 	part_list = None
@@ -157,19 +158,18 @@ async def fetch_info(sess, bv, /, stall = None):
 		expect_count = info.get("videos")
 		actual_count = len(part_list)
 		if expect_count != actual_count:
-			msg = "part count mismatch: %d/%d" % (actual_count, expect_count)
+			logger.warning("part count mismatch: %d/%d", actual_count, expect_count)
 			if expect_count < actual_count:
-				logger.warning(msg)
 				info["videos"] = actual_count
 			else:
-				raise RuntimeError(msg)
+				raise RuntimeError("part count mismatch")
 
 	# skip subtitle for now
 	return info
 
 
 async def fetch_part(sess, bvid, cid, path, force, /, stall = None, *, request = "VA", prefer = None, reject = None):
-	logger.debug("fetch part for %s, path %s, force %x", cid, path, force)
+	logger.verbose("fetch part for %s, path %s, force %x", cid, path, force)
 	stall and await stall()
 	play_info = await get_play_info(sess, bvid, cid)
 
@@ -177,14 +177,14 @@ async def fetch_part(sess, bvid, cid, path, force, /, stall = None, *, request =
 		prefer = DEFAULT_PREFER
 	if reject is None:
 		reject = DEFAULT_REJECT
-	logger.debug("prefer %s, reject %s", prefer, reject)
+	logger.verbose("prefer %s, reject %s", prefer, reject)
 
 	components = request
 	if "dash" in play_info:
-		logger.debug("dash format")
+		logger.verbose("dash format")
 		url_info, components = find_best_url_dash(play_info.get("dash"), request, prefer = prefer, reject = reject)
 	elif "durl" in play_info:
-		logger.debug("durl format")
+		logger.verbse("durl format")
 		url_info, components = find_best_url_durl(play_info.get("durl"), play_info.get("format"), prefer = prefer, reject = reject)
 	else:
 		raise RuntimeError("unknown URL format")
@@ -195,6 +195,7 @@ async def fetch_part(sess, bvid, cid, path, force, /, stall = None, *, request =
 	exception = None
 	for name, url_list in url_info.items():
 		file_path = os.path.join(path, name)
+		logger.trace("%s: %s", file_path, url_list)
 		if (not force) and os.path.isfile(file_path):
 			continue
 
@@ -222,7 +223,7 @@ async def fetch_part(sess, bvid, cid, path, force, /, stall = None, *, request =
 
 
 async def fetch_cover(sess, info, path, force, stall = None):
-	logger.debug("fetch video cover for %s, path %s, force %x" , info.get("bvid"), path, force)
+	logger.verbose("fetch video cover for %s, path %s, force %x" , info.get("bvid"), path, force)
 
 	url = info.get("pic")
 	cover_name = os.path.split(url)[1]
@@ -232,11 +233,11 @@ async def fetch_cover(sess, info, path, force, stall = None):
 		stall and await stall()
 		await network.fetch(sess, url, cover_path)
 	else:
-		logger.debug("skip cover")
+		logger.verbose("skip cover")
 
 
 async def fetch_danmaku(sess, cid, path, force, stall = None):
-	logger.debug("fetch danmaku for %s, path %s, force %x", cid, path, force)
+	logger.verbose("fetch danmaku for %s, path %s, force %x", cid, path, force)
 
 	xml_file = os.path.join(path, "danmaku.xml")
 	url = DANMAKU_URL % cid
@@ -244,11 +245,11 @@ async def fetch_danmaku(sess, cid, path, force, stall = None):
 		stall and await stall()
 		await network.fetch(sess, url, xml_file, rotate = True)
 	else:
-		logger.debug("skip danmaku")
+		logger.verbose("skip danmaku")
 
 
 async def fetch_subtitle(sess, info, cid, path, force, stall = None):
-	logger.warning("subtitle not implemented, skip")
+	logger.verbose("subtitle not implemented, skip")
 	return
 
 
@@ -267,7 +268,9 @@ async def do_fix(sess, bv, path, /, stall = None, ignore = None, max_duration = 
 		logger.info("fixing %s", bv)
 		if stat.get("info", False):
 			try:
-				with open(os.path.join(bv_root, "info.json"), 'r') as f:
+				info_path = os.path.join(bv_root, "info.json")
+				logger.debug("loading info from %s", info_path)
+				with open(info_path, 'r') as f:
 					info = json.load(f)
 			except Exception:
 				logger.exception("failed to load info.json")
@@ -275,6 +278,7 @@ async def do_fix(sess, bv, path, /, stall = None, ignore = None, max_duration = 
 		while not fetched_info:
 			if not info:
 				info = await fetch_info(sess, bv, stall)
+				logger.trace(info)
 				save_info(info, bv_root)
 				fetched_info = True
 
@@ -290,7 +294,7 @@ async def do_fix(sess, bv, path, /, stall = None, ignore = None, max_duration = 
 						exception = e
 						break
 					else:
-						logger.debug("dropping info and re-fetch")
+						logger.verbose("dropping info and re-fetch")
 						info = None
 			else:
 				break
@@ -319,13 +323,13 @@ async def do_fix(sess, bv, path, /, stall = None, ignore = None, max_duration = 
 					request += 'A'
 				try:
 					if request:
-						logger.debug("fixing %s %s", cid, request)
+						logger.verbose("fixing %s %s", cid, request)
 						await fetch_part(sess, bv, cid, part_root, True, stall, request = request, **kwargs)
 					if not part_stat.get('D', True):
-						logger.debug("fixing %s D", cid)
+						logger.verbose("fixing %s D", cid)
 						await fetch_danmaku(sess, cid, part_root, True, stall)
 					if not part_stat.get('S', True):
-						logger.debug("fixing %s S", cid)
+						logger.verbose("fixing %s S", cid)
 						await fetch_subtitle(sess, info, cid, part_root, True, stall)
 				except Exception as e:
 					logger.exception("failed to fetch part %s", cid)
@@ -344,10 +348,10 @@ async def do_fix(sess, bv, path, /, stall = None, ignore = None, max_duration = 
 
 async def do_update(sess, bv, path, force, /, stall = None, ignore = None, max_duration = None, **kwargs):
 	info = await fetch_info(sess, bv, stall)
-
 	logger.info("downloading %s, title %s", bv, info.get("title", ""))
-	exception = None
+	logger.trace(info)
 
+	exception = None
 	ignore = ignore or ""
 	with fops.locked_path(path, bv) as bv_root:
 		save_info(info, bv_root)
@@ -373,7 +377,7 @@ async def do_update(sess, bv, path, force, /, stall = None, ignore = None, max_d
 				raise Exception("duration exceeds limit: %d/%d" % (video_duration, max_duration))
 
 		finished_parts = 0
-		logger.debug("video parts %d", len(part_list))
+		logger.verbose("video parts %d", len(part_list))
 
 		for part in part_list:
 			cid = str(part.get("cid", ""))
@@ -412,7 +416,7 @@ async def download(sess, bv, video_root, mode, /, stall = None, msg_client = Non
 	if mode == "fix" and not os.path.isfile(os.path.join(video_root, bv, "info.json")):
 		mode = "update"
 
-	logger.debug("downloading %s, path %s, mode %s", bv, video_root, mode)
+	logger.verbose("downloading %s, path %s, mode %s", bv, video_root, mode)
 	done = False
 	try:
 		if mode == "fix":
@@ -453,10 +457,10 @@ async def batch_download(sess, bv_list, video_root, mode, **kwargs):
 
 async def main(args):
 	if len(args.inputs) > 0:
-		logger.debug("%d BV on cmdline", len(args.inputs))
+		logger.verbose("%d BV on cmdline", len(args.inputs))
 		bv_list = args.inputs
 	else:
-		logger.debug("scan BV in %s", args.dir or "(cwd)")
+		logger.verbose("scan BV in %s", args.dir or "(cwd)")
 		bv_list = list_bv(args.dir)
 
 	logger.info("BV count %d, mode %s", len(bv_list), args.mode)

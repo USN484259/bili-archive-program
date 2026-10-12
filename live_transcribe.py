@@ -210,6 +210,7 @@ class WavChunkProducer:
 	source)."""
 	read_size = 0x10000
 	def __init__(self, source, chunk_time_ms, /, show_progress = True):
+		logger.debug("creating %s, source %s, chunk_time %d", type(self).__name__, source, chunk_time_ms)
 		self.chunk_time_ms = chunk_time_ms
 		self.buffer = bytearray()
 		self.eof = False
@@ -218,16 +219,20 @@ class WavChunkProducer:
 		self.proc = spawn_ffmpeg(show_progress)
 		self.th = threading.Thread(target = self.feed_worker, args = (source, ))
 		self.th.start()
+		logger.debug("created %s, ffmpeg %d, worker %d", type(self).__name__, self.proc.pid, self.th.native_id)
 
 	def close(self):
 		# stop feeding, tear down ffmpeg, and wait for the feeder thread
+		logger.debug("closing %s", type(self).__name__)
 		self.quit = True
 		self.eof = True
 		self.proc.terminate()
 		self.proc.wait()
 		self.th.join()
+		logger.debug("ffmpeg %d, exit %d", self.proc.pid, self.proc.returncode)
 
 	def feed_worker(self, source):
+		logger.debug("feed worker start")
 		try:
 			pipe = self.proc.stdin
 			while not self.quit:
@@ -238,14 +243,19 @@ class WavChunkProducer:
 					raise RuntimeError("unexpected process %d exit %d", self.proc.pid, self.proc.returncode)
 				pipe.write(data)
 		except Exception as e:
+			logger.error("error in feed worker: %s", e)
 			self.error = e
 		finally:
 			pipe.close()
+			logger.debug("feed worker exit")
 
 	def get_wav_chunk(self, ms = None):
 		# read until a full chunk (default chunk_time_ms) is buffered, then
 		# hand it out as a standalone WAV file: 44-byte header + PCM bytes
-		size = pcm_bytes_per_ms * (ms or self.chunk_time_ms)
+		ms = ms or self.chunk_time_ms
+		size = pcm_bytes_per_ms * ms
+		logger.verbose("get wav chunk %d ms", ms)
+
 		while not self.eof and len(self.buffer) < size:
 			if self.error:
 				raise self.error
@@ -256,8 +266,10 @@ class WavChunkProducer:
 			self.buffer += data
 		result_data = self.buffer[:size]
 		if not result_data:
+			logger.debug("chunk eof")
 			return None
 		result_size = len(result_data)
+		logger.verbose("chunk size %d", result_size)
 		result = bytearray(make_wav_header(result_size))
 		result += result_data
 		return result
@@ -265,8 +277,9 @@ class WavChunkProducer:
 	def forward(self, ms):
 		# discard the leading PCM that has already been transcribed
 		offset = ms * pcm_bytes_per_ms
+		logger.verbose("chunk forward %d ms", ms)
 		if offset > len(self.buffer):
-			logger.warning("forward size %d exceeds wav buffer %d", offset, len(self.buffer))
+			logger.notice("forward size %d exceeds wav buffer %d", offset, len(self.buffer))
 		self.buffer[:] = self.buffer[offset:]
 
 
@@ -294,24 +307,31 @@ class Transcriber:
 	)
 
 	def __init__(self, spawner, base_offset_ms, /, show_progress = True):
+		logger.debug("creating %s, offset %d ms", type(self).__name__, base_offset_ms)
 		self.base_offset_ms = base_offset_ms
 		self.show_progress = show_progress
 		self.proc = spawner()
 		self.output = []
 		self.line_buffer = ""
-		os.set_blocking(self.proc.stdout.fileno(), False)
+
+		stdout = self.proc.stdout.fileno()
+		os.set_blocking(stdout, False)
+		logger.debug("whisper %d, stdout %d", self.proc.pid, stdout)
 
 	def close(self):
 		# terminate a whisper that is still running (e.g. aborted mid-chunk
 		# on hallucination); an already-exited process is left as-is
+		logger.debug("closing %s", type(self).__name__)
 		if self.proc.poll() is None:
 			self.proc.terminate()
 			self.proc.wait()
+		logger.debug("whisper %d, exit %d", self.proc.pid, self.proc.returncode)
 
 	def run(self, chunk):
 		# `chunk` is consumed in place; interleaving stdout reads with stdin
 		# writes keeps whisper's stdout pipe drained while we are still
 		# feeding it, avoiding a pipe-full deadlock
+		logger.info("whisper running, chunk size %d", len(chunk))
 		output = []
 		line_buffer = ""
 		# expects bytearray chunk
@@ -321,6 +341,8 @@ class Transcriber:
 			self.proc.stdin.write(chunk[:self.write_size])
 			chunk[:] = chunk[self.write_size:]
 			self.process()
+
+		logger.verbose("finished writing chunk")
 		self.proc.stdin.close()
 
 		poll = select.poll()
@@ -329,10 +351,9 @@ class Transcriber:
 			poll.poll()
 			self.process()
 
-		if self.proc.returncode == 0:
-			logger.debug("process %d exit with %d", self.proc.pid, self.proc.returncode)
-		else:
-			raise RuntimeError("process %d exit with %d", self.proc.pid, self.proc.returncode)
+		logger.info("whisper %d exit with %d", self.proc.pid, self.proc.returncode)
+		if self.proc.returncode != 0:
+			raise RuntimeError("whisper %d exit with %d", self.proc.pid, self.proc.returncode)
 
 		while self.process() is not None:
 			pass
@@ -365,12 +386,14 @@ class Transcriber:
 			logger.info(line)
 		line_match = self.output_pattern.fullmatch(line)
 		if not line_match:
-			logger.warning("cannot parse line:\t%s", line)
+			logger.notice("cannot parse line:\t%s", line)
 			return
 		start_time = self.parse_time(line_match, 1, self.base_offset_ms)
 		stop_time = self.parse_time(line_match, 5, self.base_offset_ms)
 		content = line_match.group(9)
-		self.output.append((start_time, stop_time, content))
+		block = (start_time, stop_time, content)
+		logger.trace(block)
+		self.output.append(block)
 		self.detect_hallucination()
 
 
@@ -378,11 +401,13 @@ class Transcriber:
 		if len(self.output) < self.hallucination_samples:
 			return
 		samples = self.output[-self.hallucination_samples:]
+		logger.trace(samples)
 		for i in range(self.hallucination_samples - 1):
 			if samples[i+1][2] != samples[0][2]:
 				return
 
 		diff_time = tuple(samples[i+1][0] - samples[i][1] for i in range(self.hallucination_samples - 1))
+		logger.trace(diff_time)
 		if max(diff_time) - min(diff_time) > self.hallucination_time_threshold:
 			return
 
@@ -406,6 +431,7 @@ class HttpReader:
 	retry_count = 5
 
 	def __init__(self, sess, url, hash_name = None):
+		logger.debug("creating %s, url %s, hash %s", type(self).__name__, url, hash_name)
 		self.sess = sess
 		self.url = url
 		self.offset = 0
@@ -424,6 +450,9 @@ class HttpReader:
 	def __exit__(self, *args):
 		self.close()
 
+	def __repr__(self):
+		return self.url
+
 	def get_size(self):
 		return self.file_size
 
@@ -433,7 +462,7 @@ class HttpReader:
 	def create_iterator(self):
 		# start (or, via Range, resume) fetching the media; the Range request
 		# is what makes a dropped connection recover without re-downloading
-		logger.debug("fetching %s offset %d", self.url, self.offset)
+		logger.verbose("fetching %s offset %d", self.url, self.offset)
 		headers = (self.offset > 0) and {"Range": "bytes=%d-" % self.offset} or {}
 		with self.sess.stream("GET", self.url, headers = headers) as resp:
 			resp.raise_for_status()
@@ -492,7 +521,7 @@ class HttpReader:
 			except httpx.TransportError as e:
 				logger.warning("http stream error: %s", str(e))
 
-			logger.warning("retry http stream %d/%d, offset %d", retry, self.retry_count, self.offset)
+			logger.notice("retry http stream %d/%d, offset %d", retry, self.retry_count, self.offset)
 			self.iterator = None
 			time.sleep(1)
 		else:
@@ -505,6 +534,7 @@ class HttpReader:
 
 class LocalFileReader:
 	def __init__(self, path):
+		logger.debug("creating %s, path %s", type(self).__name__, path)
 		self.file = open(path, "rb")
 		self.size = None
 		with suppress(OSError):
@@ -518,6 +548,9 @@ class LocalFileReader:
 
 	def __exit__(self, *args):
 		self.close()
+
+	def __repr__(self):
+		return self.path
 
 	def get_size(self):
 		return self.size
@@ -542,6 +575,7 @@ def transcribe(source, whisper, chunk_time, /, show_progress = True):
 	point where the repeated block started), so whisper's per-chunk
 	0-based timestamps line up with the media timeline."""
 	chunk_time_ms = chunk_time * 1000
+	logger.verbose("transcribe %s, chunk_time %d ms", source, chunk_time_ms)
 	producer = WavChunkProducer(source, chunk_time_ms, show_progress)
 	try:
 		time_offset_ms = 0
@@ -550,7 +584,7 @@ def transcribe(source, whisper, chunk_time, /, show_progress = True):
 			chunk = producer.get_wav_chunk()
 			if not chunk:
 				break
-			logger.debug("transcribing chunk at %d ms, %d bytes", time_offset_ms, len(chunk))
+			logger.verbose("transcribing chunk at %d ms, %d bytes", time_offset_ms, len(chunk))
 			transcriber = Transcriber(whisper, time_offset_ms, show_progress)
 			try:
 				transcriber.run(chunk)
@@ -567,7 +601,7 @@ def transcribe(source, whisper, chunk_time, /, show_progress = True):
 					forw_time = max(forw_time, last_time - time_offset_ms)
 				time_offset_ms += forw_time
 				producer.forward(forw_time)
-				logger.info("hallucination handled, continue at %d ms", time_offset_ms)
+				logger.notice("hallucination handled, continue at %d ms", time_offset_ms)
 			finally:
 				results += transcriber.get_result()
 				transcriber.close()
@@ -589,10 +623,10 @@ def put_srt(sess, srt_url, params, srt_content, retry):
 	for attempt in range(retry):
 		resp = sess.put(srt_url, params = params, headers = {"content-type": "application/x-subrip"},
 		                data = srt_content.encode("utf-8"))
-		logger.debug("PUT %s: %d %s", srt_url, resp.status_code, resp.text)
+		logger.verbose("PUT %s: %d %s", srt_url, resp.status_code, resp.text)
 		if resp.status_code != 503:
 			return resp.status_code
-		logger.warning("server busy (503) on %s, retry %d/%d", srt_url, attempt + 1, retry)
+		logger.notice("server busy (503) on %s, retry %d/%d", srt_url, attempt + 1, retry)
 		time.sleep(put_retry_delay)
 	return resp.status_code
 
@@ -645,10 +679,10 @@ def http_main(args, msg_client):
 
 				srt_content = convert_to_srt(segments)
 				logger.info("%s done with %d lines", media_url, len(segments))
-				logger.debug("size %d, %s %s", file_size, hash_name, hash_value)
+				logger.verbose("size %d, %s %s", file_size, hash_name, hash_value)
 
 				if not segments:
-					logger.warning("empty transcription for %s, skipped", media_url)
+					logger.notice("empty transcription for %s, skipped", media_url)
 					post_api(sess, api_url, "del", media_url)
 					summary[media_url] = "(empty)"
 					continue

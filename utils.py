@@ -7,6 +7,9 @@ import logging
 
 import constants
 
+LOG_NOTICE_LEVEL = logging.INFO + 5
+LOG_VERBOSE_LEVEL = logging.INFO - 5
+LOG_TRACE_LEVEL = logging.DEBUG - 5
 
 UNIT_TABLE = {
 	'k': 1000,
@@ -44,28 +47,27 @@ def get_relative_path(path, root):
 
 
 def logger_init(rel_level = 0, /, log_file = None, noprint = False):
-	extra_args = {}
+	# inject_custom_levels
+	logging.addLevelName(LOG_NOTICE_LEVEL, "NOTICE")
+	logging.addLevelName(LOG_VERBOSE_LEVEL, "VERBOSE")
+	logging.addLevelName(LOG_TRACE_LEVEL, "TRACE")
+	logging.Logger.notice = lambda self, *args, **kwargs: self.log(LOG_NOTICE_LEVEL, *args, **kwargs)
+	logging.Logger.verbose = lambda self, *args, **kwargs: self.log(LOG_VERBOSE_LEVEL, *args, **kwargs)
+	logging.Logger.trace = lambda self, *args, **kwargs: self.log(LOG_TRACE_LEVEL, *args, **kwargs)
+
+	level = logging.INFO - rel_level * 5
+	handlers = []
+	if not noprint:
+		handlers.append(logging.StreamHandler(stream = sys.stderr))
 	if log_file:
-		extra_args = {"filename": log_file}
-	elif not noprint:
-		extra_args = {"stream": sys.stderr}
-	else:
-		raise RuntimeError("missing log_file")
+		handlers.append(logging.FileHandler(log_file, delay = True))
 
-	level = logging.INFO - rel_level * 10
+	logging.basicConfig(level = level, format = constants.LOG_FORMAT, force = True, handlers = handlers)
 
-	logging.basicConfig(level = level, format = constants.LOG_FORMAT, force = True, **extra_args)
 	root_logger = logging.getLogger()
-
-	if (not noprint) and log_file:
-		handler = logging.FileHandler(log_file, delay = True)
-		handler.setFormatter(logging.Formatter(constants.LOG_FORMAT))
-		root_logger.addHandler(handler)
-
 	filter_func = lambda rec: rec.levelno > level or rec.name.startswith("bili_arch")
 	for handler in root_logger.handlers:
 		handler.addFilter(filter_func)
-
 
 def list_bv(path):
 	bv_list = []

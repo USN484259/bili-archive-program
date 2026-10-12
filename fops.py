@@ -115,7 +115,7 @@ class staged_file:
 		except Exception as e:
 			logger.error("failed to rotate file %s: %s", self.filename, str(e))
 			backup_name = self.filename + default_names.backup_postfix
-			logger.info("using backup file %s", backup_name)
+			logger.notice("using backup file %s", backup_name)
 			if os.path.isfile(backup_name):
 				raise FileExistsError(backup_name + " already exists")
 			logger.debug("move %s to %s",self.filename, backup_name)

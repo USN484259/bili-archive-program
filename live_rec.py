@@ -93,7 +93,7 @@ def find_best_url(info, *, prefer = "", reject = ""):
 				result_score = prefer.find(result.get("format_name")) + prefer.find(result.get("codec_name"))
 
 	if result:
-		logger.debug("best: protocol %s, format %s, codec %s, qn %d", result.get("protocol_name"), result.get("format_name"), result.get("codec_name"), result.get("current_qn"))
+		logger.verbose("best: protocol %s, format %s, codec %s, qn %d", result.get("protocol_name"), result.get("format_name"), result.get("codec_name"), result.get("current_qn"))
 	return result
 
 
@@ -104,6 +104,7 @@ def make_record_name(uname, title):
 
 
 async def record_flv(sess, info, file_name):
+	logger.info("record flv into %s", file_name)
 	connected = False
 
 	def on_file_open(*args):
@@ -123,6 +124,7 @@ async def record_flv(sess, info, file_name):
 
 
 async def record_hls(sess, info, file_name):
+	logger.info("record hls into %s", file_name)
 	url_info_list = info.get("url_info")
 	last_url_index = 0
 	cur_url_index = 0
@@ -172,7 +174,7 @@ async def record_danmaku(rid, path, /, relay_path = None, *, fetch_images = True
 	from live_danmaku import LiveDanmaku, DanmakuRelay
 
 	danmaku_file_name = os.path.join(path, "danmaku.ndjson")
-	logger.info("recording %s danmaku into %s", rid, danmaku_file_name)
+	logger.info("record danmaku from %s into %s", rid, danmaku_file_name)
 	with fops.locked_file(danmaku_file_name, "a", buffering = 1) as f:
 		async with AsyncExitStack() as stack:
 			relay_server = None
@@ -220,12 +222,12 @@ async def record(sess, rid, path, *, msg_client = None, do_record_danmaku = True
 	danmaku_task = None
 	need_stop_msg = False
 	try:
-		logger.debug("record live %d into %s", rid, path)
+		logger.info("record live %d into %s", rid, path)
 		if prefer is None:
 			prefer = DEFAULT_PREFER
 		if reject is None:
 			reject = DEFAULT_REJECT
-		logger.debug("prefer %s, reject %s", prefer, reject)
+		logger.verbose("prefer %s, reject %s", prefer, reject)
 
 		if relay_path:
 			try:
@@ -234,7 +236,7 @@ async def record(sess, rid, path, *, msg_client = None, do_record_danmaku = True
 				logger.exception("cannot create relay path %s", relay_path)
 
 		if do_record_danmaku and not runtime.credential:
-			logger.warning("missing credential, not recording danmaku")
+			logger.notice("missing credential, not recording danmaku")
 			do_record_danmaku = False
 
 		if msg_client:
@@ -249,6 +251,7 @@ async def record(sess, rid, path, *, msg_client = None, do_record_danmaku = True
 			need_stop_msg = True
 
 		if do_record_danmaku:
+			logger.verbose("starting danmaku task")
 			danmaku_task = asyncio.create_task(record_danmaku(rid, path, relay_path))
 			danmaku_task.add_done_callback(asyncio.Task.result)
 
@@ -277,7 +280,7 @@ async def record(sess, rid, path, *, msg_client = None, do_record_danmaku = True
 				if not url_info:
 					norej_info = find_best_url(info, prefer = prefer)
 					if norej_info:
-						logger.warning("bad reject: %s", reject)
+						logger.notice("bad reject: %s", reject)
 						url_info = norej_info
 
 				protocol_name = url_info.get("protocol_name")
@@ -310,9 +313,11 @@ async def record(sess, rid, path, *, msg_client = None, do_record_danmaku = True
 		raise
 	finally:
 		if danmaku_task is not None:
+			logger.verbose("stopping danmaku task")
 			with suppress(asyncio.CancelledError):
 				danmaku_task.cancel()
 
+		logger.info("record live %d stopped", rid)
 		if need_stop_msg:
 			msg_client.send(topic.live_rec, json = {
 				"timestamp":	int(time.time()),
@@ -354,7 +359,7 @@ async def main(args):
 				logger.info("room %d not streaming, exit", args.room)
 				return
 
-			logger.info("checking done, sleep %d sec", args.interval)
+			logger.verbose("checking done, sleep %d sec", args.interval)
 			await asyncio.sleep(args.interval)
 
 

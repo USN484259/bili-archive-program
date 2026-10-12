@@ -159,7 +159,7 @@ def set_persist_wal(database):
 	try:
 		database.file_control(sqlite3.SQLITE_FCNTL_PERSIST_WAL, True)
 	except Exception:
-		logger.warning("cannot set persist_wal")
+		logger.notice("cannot set persist_wal")
 	pass
 
 
@@ -177,6 +177,7 @@ class VideoDatabase:
 		return sqlite3.connect("file:%s?mode=ro" % db_file, uri = True, check_same_thread = False)
 
 	def __init__(self, db_file):
+		logger.debug("creating %s, db %s", type(self).__name__, db_file)
 		self.database = None
 		# assert(sqlite3.threadsafety == 3)
 		self.database = self.connect(db_file)
@@ -193,6 +194,7 @@ class VideoDatabase:
 		self.close()
 
 	def close(self):
+		logger.debug("closing %s", type(self).__name__)
 		if self.database is not None:
 			try:
 				self.database.close()
@@ -201,6 +203,7 @@ class VideoDatabase:
 
 
 	def query(self, rules = {}):
+		logger.trace("query %s", rules)
 		cond_list = []
 		arg_list = []
 		order_key = "mtime"
@@ -265,7 +268,7 @@ class VideoDatabase:
 		count_sql = "SELECT COUNT(DISTINCT bvid) AS count" + from_sql
 
 		logger.debug(sql)
-		logger.debug(arg_list)
+		logger.trace(arg_list)
 
 		cursor = self.database.cursor()
 		try:
@@ -282,6 +285,7 @@ class VideoDatabase:
 			cursor.execute(sql, arg_list)
 			data = cursor.fetchall()
 			cursor.execute("END")
+			logger.debug("query found %d results, fetched %d offset %d", count, len(data), offset)
 			return data, count
 		finally:
 			cursor.close()
@@ -330,6 +334,7 @@ class VideoDatabaseManager(VideoDatabase):
 		self.video_root = os.path.realpath(video_root)
 		set_persist_wal(self.database)
 
+		logger.debug("video_root %s, update_path %s", video_root, update_path)
 		cursor = self.database.cursor()
 		try:
 			cursor.execute("PRAGMA journal_mode = WAL;")
@@ -353,9 +358,9 @@ class VideoDatabaseManager(VideoDatabase):
 				recorded_root = cursor.fetchone()["root"]
 				if recorded_root != self.video_root:
 					err_msg = "video root mismatch: %s\t%s" % (recorded_root, self.video_root)
-					logger.warning(err_msg)
+					logger.notice(err_msg)
 					if update_path:
-						logger.warning("update video root in database")
+						logger.notice("update video root in database")
 						cursor.execute("UPDATE %s SET root = ?" % meta_table_name, (self.video_root, ))
 					else:
 						raise Exception(err_msg)
@@ -455,7 +460,7 @@ class VideoDatabaseManager(VideoDatabase):
 		if not constants.bvid_pattern.fullmatch(bvid):
 			raise ValueError("invalid video %s", bvid)
 
-		logger.debug("update video %s", bvid)
+		logger.verbose("update video %s", bvid)
 		json_info = self.load_info_json(bvid)
 
 		cursor = self.database.cursor()
@@ -474,7 +479,7 @@ class VideoDatabaseManager(VideoDatabase):
 			db_bv_info = db_info["bv_info"]
 			json_bv_info = json_info["bv_info"]
 			if json_bv_info["mtime"] <= db_bv_info["mtime"]:
-				logger.debug("skip video %s", bvid)
+				logger.verbose("skip video %s", bvid)
 				# close the transaction
 				cursor.execute("ROLLBACK")
 				return False
@@ -528,7 +533,7 @@ class VideoDatabaseManager(VideoDatabase):
 			bv_root = os.path.join(self.video_root, bvid)
 			sizes = []
 
-			logger.debug("checking video size %s", bvid)
+			logger.verbose("checking video size %s", bvid)
 			cursor.execute("BEGIN DEFERRED")
 			with os.scandir(bv_root) as it:
 				for bv_entry in it:
@@ -568,12 +573,12 @@ class VideoDatabaseManager(VideoDatabase):
 				stat = os.stat(os.path.join(self.video_root, bvid, "info.json"))
 				if S_ISREG(stat.st_mode):
 					if not check_file or self.load_info_json(bvid):
-						logger.debug("not removing video %s", bvid)
+						logger.verbose("not removing video %s", bvid)
 						return False
 			except OSError:
 				pass
 
-		logger.debug("removing video %s", bvid)
+		logger.verbose("removing video %s", bvid)
 		cursor = self.database.cursor()
 		try:
 			cursor.execute("BEGIN IMMEDIATE")
@@ -595,14 +600,14 @@ class VideoDatabaseManager(VideoDatabase):
 
 	def walk(self, *, callback = None):
 		start_time = int(time.time())
-		logger.info("start walking %s %d", self.video_root, start_time)
+		logger.info("start walking %s", self.video_root)
 		with os.scandir(self.video_root) as it:
 			for entry in it:
+				logger.trace(entry)
 				updated = False
 				try:
 					if entry.is_dir() and constants.bvid_pattern.fullmatch(entry.name):
 						bvid = entry.name
-						logger.debug("loading %s", bvid)
 						if self.update_video(bvid):
 							self.update_video_size(bvid)
 							updated = True
@@ -617,6 +622,7 @@ class VideoDatabaseManager(VideoDatabase):
 
 
 	def autoremove(self):
+		logger.info("autoremove on %s", self.video_root)
 		cursor = self.database.cursor()
 		try:
 			cursor.arraysize = 0x40
@@ -630,7 +636,7 @@ class VideoDatabaseManager(VideoDatabase):
 						count += 1
 				except Exception:
 					logger.exception("failed to remove %s", bvid)
-			logger.info("removed %d videos", count)
+			logger.info("autoremoved %d videos", count)
 		finally:
 			cursor.close()
 

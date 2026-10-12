@@ -74,16 +74,16 @@ class BVDownloader:
 		try:
 			if self.pipe[0].poll():
 				self.msg = str(self.pipe[0].recv())
-				logger.debug("got message %s", self.msg)
+				logger.verbose("got message from %d: %s", self.task.pid, self.msg)
 		except Exception:
 			logger.exception("exception in polling pipe")
 
 		if self.task is not None and not self.task.is_alive():
 			exitcode = self.task.exitcode
+			logger.verbose("task %d exit %d", self.task.pid, exitcode)
 			self.task.close()
 			self.task = None
 			rec = self.queue.popleft()
-			logger.info("task end %s (%d)", rec["bvid"], exitcode)
 
 			if rec["status"] != "cancelled":
 				assert(rec["status"] == "running")
@@ -91,8 +91,10 @@ class BVDownloader:
 					rec["status"] = "done"
 				else:
 					rec["status"] = "failed %s" % (self.msg or "(unknown error)")
-			rec["stop_time"] = int(time.time() * 1000)
+			stop_time = int(time.time() * 1000)
+			rec["stop_time"] = stop_time
 			done_bvid = rec["bvid"]
+			logger.info("%s %s, duration %d", done_bvid, rec["status"], stop_time - rec["start_time"])
 			self.history.append(rec)
 
 		while self.task is None and self.queue:
@@ -101,17 +103,20 @@ class BVDownloader:
 				self.queue.popleft()
 				continue
 			assert(rec["status"] == "waiting")
-			logger.info("task start %s", rec["bvid"])
+			logger.info("%s start", rec["bvid"])
 			self.task = self.download(rec["bvid"], rec.get("args", {}))
+			logger.verbose("create task %d", self.task.pid)
 			rec["start_time"] = int(time.time() * 1000)
 			rec["status"] = "running"
 
 		if done_bvid and callable(self.db_func):
+			logger.debug("db callback for %s", done_bvid)
 			self.db_func(done_bvid)
 
 
 	def schedule(self, bvid, args = {}):
 		if len(self.queue) >= self.queue.maxlen:
+			logger.notice("download queue full, refusing %s", bvid)
 			return False
 
 		self.queue.append({
@@ -120,6 +125,7 @@ class BVDownloader:
 			"status": "waiting",
 			"create_time": int(time.time() * 1000)
 		})
+		logger.verbose("queued %s", bvid)
 		self.update()
 		return True
 
@@ -134,11 +140,12 @@ class BVDownloader:
 				rec["status"] = "cancelled"
 				self.update()
 				return True
+		logger.notice("cannot cancel %s", bvid)
 		return False
 
 
 	def status(self, since):
-		logger.debug("read status since %d", since)
+		logger.verbose("read status since %d", since)
 		def make_diff_list(rec_list, since):
 			if since == 0:
 				return list(rec_list)
@@ -163,7 +170,7 @@ class BVDownloader:
 
 		if self.queue and self.queue[0].get("status", "") == "running":
 			result["running"] = self.queue[0].get("start_time", 0)
-
+		logger.trace(result)
 		return result
 
 
@@ -188,12 +195,13 @@ class bv_play_handler(HttpResponseMixin, FcgiHandler):
 			else:	# POST
 				try:
 					query_str = self.read().decode("utf-8")
-					logger.info("query: %s", query_str)
+					logger.verbose("POST %s", query_str)
 
 					query = parse_qs(query_str, keep_blank_values = True, strict_parsing = True)
 					bv_match = constants.bvid_pattern.fullmatch(query["bvid"][0])
 					bvid = bv_match[1]
 				except (TypeError, ValueError, KeyError, IndexError, UnicodeError):
+					logger.notice("bad POST %s", query_str)
 					return self.send_response(400)
 
 				args = {}
@@ -210,15 +218,20 @@ class bv_play_handler(HttpResponseMixin, FcgiHandler):
 							del args["max_duration"]
 
 					except ValueError:
+						logger.notice("invalid max_duration")
 						return self.send_response(400)
 
 				if "audio_only" in query:
 					args["ignore"] = 'V'
 
+				logger.verbose("max_duration %s, ignore %s", args.get("max_duration"), args.get("ignore"))
+
 				result = self.server.schedule(bvid, args)
 				if result:
+					logger.info("scheduled %s", bvid)
 					return self.send_response(200, json = result)
 				else:
+					logger.info("cannot schedule %s", bvid)
 					return self.send_response(429)
 
 		except Exception:
@@ -239,7 +252,7 @@ class BVPlayServer(FcgiServer):
 		self.bv_downloader = BVDownloader(cache_root, self.handle_db_update, args)
 
 	def sig_walk(self, signum, frame):
-		logger.info("walk scheduled")
+		logger.info("signal walk")
 		self.need_walk = True
 
 	def handle_db_update(self, bvid):

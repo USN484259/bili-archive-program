@@ -84,7 +84,7 @@ def wbi_sign_request(wbi_key, kwargs):
 	params["wts"] = int(time.time())
 	params = dict(sorted(params.items()))
 	query = urlencode(params)
-	logger.debug(query)
+	logger.trace(query)
 	params["w_rid"] = md5sum(query, wbi_key)
 	result_args = {k: kwargs[k] for k in kwargs if k != "params"}
 	result_args["params"] = dict(sorted(params.items()))
@@ -106,9 +106,9 @@ def session(credential = None):
 
 async def check_credential(sess):
 	response = await sess.request("GET", CHECK_CREDENTIAL_URL)
-	logger.debug(response)
+	logger.trace(response)
 	result = response.json()
-	logger.debug(result)
+	logger.trace(result)
 	code = result.get("code")
 	if code != 0:
 		raise RuntimeError("bad credential %d" % code)
@@ -144,23 +144,23 @@ async def request(sess, method, url, /, wbi_sign = False, **kwargs):
 
 
 async def fetch(sess, url, path, **kwargs):
-	logger.debug("fetching %s into %s", url, path)
+	logger.verbose("fetching %s from %s", path, url)
 	async with sess.stream("GET", url) as resp:
-		logger.debug(resp)
+		logger.trace(resp)
 		resp.raise_for_status()
 
 		file_length = None
 		length = resp.headers.get('content-length')
 		if length:
 			length = int(length)
-			logger.debug("content length %d", length)
+			logger.verbose("content length %d", length)
 		else:
-			logger.warning("missing content-length")
+			logger.verbose("missing content-length")
 
 		with fops.staged_file(path, "wb", **kwargs) as f:
 			last_timestamp = None
 			if runtime.bandwidth_limit:
-				logger.debug("bandwidth limit %d B/s", runtime.bandwidth_limit)
+				logger.verbose("bandwidth limit %d B/s", runtime.bandwidth_limit)
 				last_timestamp = time.monotonic()
 
 			async for chunk in resp.aiter_bytes():
@@ -177,10 +177,10 @@ async def fetch(sess, url, path, **kwargs):
 					last_timestamp = cur_timestamp
 
 			file_length = f.tell()
-			logger.debug("EOF with file length %d", file_length)
+			logger.verbose("EOF with file length %d", file_length)
 
 			if length and file_length != length:
-				logger.warning("%s size mismatch, expect %d got %d", path, length, file_length)
+				logger.notice("%s size mismatch, expect %d got %d", path, length, file_length)
 				if length > file_length:
 					raise RuntimeError("unexpected EOF: %s", path)
 
@@ -188,15 +188,16 @@ async def fetch(sess, url, path, **kwargs):
 
 
 async def fetch_stream(sess, url, sink_func = None, *args):
+	logger.verbose("fetching stream %s", url)
 	sink = None
 	try:
 		async with sess.stream("GET", url) as resp:
-			logger.debug(resp)
+			logger.trace(resp)
 			resp.raise_for_status()
 
 			async for chunk in resp.aiter_bytes():
 				if sink is None:
-					logger.debug("calling sink_func")
+					logger.verbose("calling sink_func")
 					sink = sink_func and sink_func(*args) or io.BytesIO()
 
 				sink.write(chunk)
@@ -207,7 +208,7 @@ async def fetch_stream(sess, url, sink_func = None, *args):
 
 	finally:
 		if sink_func and (sink is not None):
-			logger.debug("closing sink")
+			logger.verbose("closing sink")
 			sink.close()
 
 
@@ -256,7 +257,7 @@ class image_fetcher:
 	async def worker(self):
 		while not self.quit:
 			if self.queue.empty():
-				logger.info("image_fetcher standby")
+				logger.verbose("image_fetcher standby")
 
 			path, name, url = await self.queue.get()
 			if (path and name and url):
@@ -270,7 +271,7 @@ class image_fetcher:
 							logger.debug("reusing image %s", cached_file)
 							shutil.copyfile(cached_file, file_name)
 						else:
-							logger.info("fetching image %s", name)
+							logger.verbose("fetching image %s", name)
 							await self.stall()
 							await fetch(self.sess, url, file_name)
 							self.cache_map[name] = file_name
@@ -282,4 +283,4 @@ class image_fetcher:
 
 			self.queue.task_done()
 
-		logger.info("image_fetcher exited")
+		logger.verbose("image_fetcher exited")

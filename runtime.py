@@ -107,7 +107,7 @@ def parse_args(std_args, extra_args = (), *, arg_list = None, opt_auth = False):
 	if getattr(args, "root", None):
 		root_dir = args.root
 
-	logger.debug(args)
+	logger.trace(args)
 
 	# keep credential safe, load after print
 	if getattr(args, "credential", None):
@@ -115,7 +115,7 @@ def parse_args(std_args, extra_args = (), *, arg_list = None, opt_auth = False):
 			load_credential(args.credential)
 		except Exception as e:
 			if opt_auth:
-				logger.warning("cannot load credential, skipping: %s", str(e))
+				logger.notice("cannot load credential, skipping: %s", str(e))
 			else:
 				raise
 
@@ -133,7 +133,7 @@ class Stall:
 			cur_time = time.monotonic()
 			time_diff = cur_time - self.last_time
 			time_wait = self.stall_time - time_diff
-			logger.debug("stall %.1f sec",  max(time_wait, 0))
+			logger.verbose("stall %.1f sec",  max(time_wait, 0))
 			if time_diff > 0 and time_wait > 0:
 				await asyncio.sleep(time_wait)
 				cur_time = time.monotonic()

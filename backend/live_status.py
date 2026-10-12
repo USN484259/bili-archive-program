@@ -59,7 +59,7 @@ class LiveStatusServer(AsyncFcgiServer):
 			try:
 				await asyncio.wait_for(self.cond.wait(), timeout = self.live_status_query_timeout)
 			except asyncio.TimeoutError:
-				logger.warning("timeout waiting for live-status")
+				logger.notice("timeout waiting for live-status")
 
 			return self.cached_result
 
