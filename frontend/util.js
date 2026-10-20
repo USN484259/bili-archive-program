@@ -100,7 +100,16 @@ export function stat_string(number) {
 
 }
 
-const localtime = new Intl.DateTimeFormat(undefined, {dateStyle: "medium", timeStyle: "medium"});
+const localtime = new Intl.DateTimeFormat('en-ZA', {
+	year: 'numeric',
+	month: '2-digit',
+	day: '2-digit',
+	hour: '2-digit',
+	minute: '2-digit',
+	second: '2-digit',
+	hourCycle: 'h23',
+	// timeZoneName: 'longOffset'
+})
 
 export function localtime_string(time_ms) {
 	return localtime.format(new Date(time_ms));

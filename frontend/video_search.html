@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- This file contains code written by Copilot, GPT 4.1 -->
+<!-- This file is written with the assistance of Copilot-GPT-4.1 and opencode-deepseek-v4.1-flash -->
 <html>
 <head>
 	<meta charset="utf-8">
@@ -24,8 +24,19 @@
 
 		<div id="selection">
 			<span id="selected-count">0 selected</span>
-			<button id="deselect">Clear selection</button>
+			<div class="sel-flex">
+				<button id="select-all">All</button>
+				<button id="select-clear">Clear</button>
+			</div>
 			<button id="copy-button">Copy to clipboard</button>
+			<div class="sel-flex">
+				<select id="flags-action">
+					<option value="add" selected>add</option>
+					<option value="remove">remove</option>
+				</select>
+				<input id="flags-input" type="text" placeholder="space separated flags"/>
+			</div>
+			<button id="flags-button">update flags</button>
 		</div>
 	</div>
 	<div>
@@ -50,6 +61,7 @@
 				<th>duration</th>
 				<th>likes/views</th>
 				<th>mtime</th>
+				<th>flags</th>
 			</tr>
 		</thead>
 		<tbody>
@@ -90,6 +102,30 @@
 }
 #selected-count {
 	margin-left:10px;
+}
+.sel-flex {
+	display: flex;
+}
+#selected-count, #flags-status, #select-all, #select-clear {
+	flex: 1;
+}
+
+/*
+.flags-update {
+	display: flex;
+	align-items: center;
+	margin-top: 4px;
+}
+.flags-update select, .flags-update input {
+	margin-right: 4px;
+	padding: 2px 4px;
+}
+.flags-update input {
+	width: 160px;
+}
+*/
+#flags-status {
+	margin-left: 10px;
 }
 
 #output {
@@ -153,6 +189,7 @@ const page_size = 20;
 let conditions = [];
 let page = 0;
 
+let currentBvidSet = null;
 let selectedBvidSet = null;
 
 
@@ -161,7 +198,7 @@ const sort_keys = [
 ];
 
 const query_keys = [
-	"bvid", "title", "tags", "uname", "uid", "desc", "mtime", "parts", "duration", "ctime", "pubtime", "views", "likes", "size"
+	"bvid", "title", "tags", "flags", "uname", "uid", "desc", "mtime", "parts", "duration", "ctime", "pubtime", "views", "likes", "size"
 ];
 
 function initSortKeys(key = "mtime") {
@@ -271,6 +308,9 @@ function renderResultsTable(data) {
 		const mtimeTd = document.createElement("td");
 		mtimeTd.textContent = util.localtime_string(row.mtime * 1000);
 		tr.appendChild(mtimeTd);
+		const flagsTd = document.createElement("td");
+		flagsTd.textContent = row.flags;
+		tr.appendChild(flagsTd);
 
 		tr.addEventListener("click", (e) => {
 			if (e.target.closest("a") === null)
@@ -284,10 +324,13 @@ function renderResultsTable(data) {
 	}
 }
 
-function cleanResultsTable() {
+function setResultsTable(state) {
 	const tbody = document.querySelector("#results tbody");
 	for (let tr of tbody.children) {
-		tr.classList.remove("selected-row");
+		if (state)
+			tr.classList.add("selected-row");
+		else
+			tr.classList.remove("selected-row");
 	}
 }
 
@@ -382,6 +425,11 @@ async function update() {
 		status.innerText = "searching";
 		let results = await query();
 		status.innerText = "" + results.count + " results, page " + (page + 1);
+
+		currentBvidSet = new Set();
+		for (const row of results.data) {
+			currentBvidSet.add(row.bvid);
+		}
 		renderResultsTable(results.data);
 		for (const bar of document.getElementsByClassName("pages-btn")) {
 			renderPagesBar(bar, results.count);
@@ -421,6 +469,58 @@ function copySelectedBvids() {
 	}
 }
 
+function setFlagsResult(text) {
+	const buttonElem = document.getElementById("flags-button");
+	buttonElem.textContent = text;
+	setTimeout(() => {
+		buttonElem.textContent = "update flags";
+	}, 3 * 1000);
+}
+
+// add or remove space separated flags on the selected videos; the request
+// is handled asynchronously by the database daemon through the messaging
+// service, so the table is not updated here (re-search to see the changes)
+async function updateFlags() {
+	const actionElem = document.getElementById("flags-action");
+	const inputElem = document.getElementById("flags-input");
+	const buttonElem = document.getElementById("flags-button");
+	const flags = inputElem.value.trim().split(/\s+/).filter((flag) => flag !== "");
+
+	if (selectedBvidSet === null || selectedBvidSet.size === 0) {
+		setFlagsResult("no video selected");
+		return;
+	}
+	if (flags.length === 0) {
+		setFlagsResult("no flag given");
+		return;
+	}
+
+	const body = {
+		"path": video_root,
+		"action": "flags",
+		"bv_list": Array.from(selectedBvidSet),
+	};
+	if (actionElem.value === "remove")
+		body.del = flags;
+	else
+		body.add = flags;
+
+	try {
+		const resp = await fetch(config.video_database_api, {
+			method: "POST",
+			headers: {"content-type": "application/json"},
+			body: JSON.stringify(body),
+		});
+		if (!resp.ok)
+			throw new Error("" + resp.status + " " + resp.statusText);
+		inputElem.value = "";
+		setFlagsResult("flags updated");
+	} catch (e) {
+		console.error(e);
+		setFlagsResult("update flags failed");
+	}
+}
+
 document.addEventListener("DOMContentLoaded", () => util_module.then((util) => {
 	globalThis.util = util;
 
@@ -432,8 +532,10 @@ document.addEventListener("DOMContentLoaded", () => util_module.then((util) => {
 	const addBtn = document.getElementById("add-condition");
 	const searchBtn = document.getElementById("search");
 	const resetBtn = document.getElementById("reset");
-	const selectionBtn = document.getElementById("deselect");
+	const selectionAllBtn = document.getElementById("select-all");
+	const selectionClearBtn = document.getElementById("select-clear");
 	const copyBtn = document.getElementById("copy-button");
+	const flagsBtn = document.getElementById("flags-button");
 	const outputArea = document.getElementById("output");
 
 	addBtn.onclick = () => {
@@ -454,13 +556,22 @@ document.addEventListener("DOMContentLoaded", () => util_module.then((util) => {
 		update();
 	};
 
-	selectionBtn.addEventListener("click", (e) => {
+	selectionAllBtn.addEventListener("click", (e) => {
+		if (currentBvidSet) {
+			currentBvidSet.forEach((val, key, obj) => selectedBvidSet.add(val));
+			setResultsTable(true);
+			updateSelectedCount();
+			outputArea.hidden = true;
+		}
+	});
+	selectionClearBtn.addEventListener("click", (e) => {
 		selectedBvidSet.clear();
-		cleanResultsTable();
+		setResultsTable(false);
 		updateSelectedCount();
 		outputArea.hidden = true;
 	});
 	copyBtn.addEventListener("click", copySelectedBvids);
+	flagsBtn.addEventListener("click", updateFlags);
 
 	for (const gotoBtn of document.getElementsByClassName("goto-button")) {
 		gotoBtn.onclick = () => {

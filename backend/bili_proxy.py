@@ -114,4 +114,4 @@ if __name__ == "__main__":
 	args = runtime.parse_args(("network", "auth"), opt_auth = True)
 
 	with BiliProxyServer(bili_proxy_handler) as server:
-		server.serve_forever(poll_interval = 600)
+		server.serve_forever()

@@ -115,7 +115,7 @@ if __name__ == "__main__":
 				with suppress(OSError):
 					os.unlink(args.danmaku_socket)
 				with DanmakuServer(args.danmaku_root, args.danmaku_socket, danmaku_handler) as server:
-					server.serve_forever(poll_interval = 600)
+					server.serve_forever()
 
 			finally:
 				os._exit(0)

@@ -66,24 +66,24 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 
 + M	必需依赖
 + O	可选依赖
-+ UNIX 指 Linux, MacOS, BSD 等**非Windows**平台，理论上兼容Windows上的MinGW / WSL，目前仅在Linux平台上验证过
++ UNIX 指 Linux, MacOS, BSD 等**非Windows**平台，理论上兼容Windows上的 MinGW / Cygwin / WSL，目前仅在Linux和FreeBSD上验证过
 + http前端 理论上兼容所有现代浏览器，目前仅在 *Firefox* 和 *Android WebView 83* 上验证过
 
 ### 工具模块
 
-|	项目			|	OS	|	Python		|	httpx		|	ffmpeg/ffprobe		|	whisper-cli	|	websockets	|	brotli	|	psutil	|	messaging.py	|
-|	----			|	----	|	----		|	----		|	----			|	----		|	----		|	----	|	----	|	----		|
-|	video.py		|	UNIX	|	3.8+		|	M		|				|			|			|		|		|	O		|
-|	favlist.py		|	UNIX	|	3.8+		|	M		|				|			|			|		|		|			|
-|	user.py			|	UNIX	|	3.8+		|	M		|				|			|			|		|		|			|
-|	verify.py		|	any	|	3.8+		|			|	O			|			|			|		|		|			|
-|	live_rec.py		|	UNIX	|	3.8+		|	M		|				|			|	O		|	O	|		|	O		|
-|	monitor.py		|	UNIX	|	3.8+		|	M		|				|			|			|		|		|	O		|
-|	messaging.py		|	Linux	|	3.8+		|			|				|			|			|		|		|			|
-|	video_database.py	|	any	|	3.8+		|			|				|			|			|		|		|			|
-|	database_daemon.py	|	UNIX	|	3.8+		|			|				|			|			|		|	O	|	O		|
-|	merge_video.py		|	any	|	3.8+		|			|				|			|			|		|		|			|
-|	live_transcribe.py	|	UNIX	|	3.8+		|	O		|	M			|	M		|			|		|	O	|	O		|
+|	项目			|	OS	|	Python		|	httpx		|	ffmpeg/ffprobe		|	whisper-cli	|	websockets	|	brotli	|	psutil	|	messaging.py	|	simple-inotify	|
+|	----			|	----	|	----		|	----		|	----			|	----		|	----		|	----	|	----	|	----		|	----		|
+|	video.py		|	UNIX	|	3.8+		|	M		|				|			|			|		|		|	O		|			|
+|	favlist.py		|	UNIX	|	3.8+		|	M		|				|			|			|		|		|			|			|
+|	user.py			|	UNIX	|	3.8+		|	M		|				|			|			|		|		|			|			|
+|	verify.py		|	any	|	3.8+		|			|	O			|			|			|		|		|			|			|
+|	live_rec.py		|	UNIX	|	3.8+		|	M		|				|			|	O		|	O	|		|	O		|			|
+|	monitor.py		|	UNIX	|	3.8+		|	M		|				|			|			|		|		|	O		|	O		|
+|	messaging.py		|	UNIX	|	3.8+		|			|				|			|			|		|		|			|			|
+|	video_database.py	|	any	|	3.8+		|			|				|			|			|		|		|			|			|
+|	database_daemon.py	|	UNIX	|	3.8+		|			|				|			|			|		|	O	|	O		|			|
+|	merge_video.py		|	any	|	3.8+		|			|				|			|			|		|		|			|			|
+|	live_transcribe.py	|	UNIX	|	3.8+		|	O		|	M			|	M		|			|		|	O	|	O		|			|
 
 ### http后端
 
@@ -92,11 +92,11 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 |	dir_listing.py		|	any	|	3.8+		|	M		|			|			|			|
 |	zip_access.py		|	any	|	3.8+		|	M		|			|			|			|
 |	video_cache.py		|	UNIX	|	3.8+		|	M		|			|	M		|			|
-|	live_status.py		|	Linux	|	3.8+		|	M		|			|	M		|	M		|
+|	live_status.py		|	UNIX	|	3.8+		|	M		|			|	M		|	M		|
 |	bili_proxy.py		|	any	|	3.8+		|	M		|			|	M		|			|
 |	image_cache.py		|	UNIX	|	3.8+		|	M		|			|	M		|			|
-|	video_query.py		|	any	|	3.8+		|	M		|			|			|			|
-|	transcription.py	|	Linux	|	3.8+		|	M		|	O		|			|	O		|
+|	video_query.py		|	any	|	3.8+		|	M		|			|			|	O		|
+|	transcription.py	|	UNIX	|	3.8+		|	M		|	O		|			|	O		|
 
 ### http前端
 
@@ -123,8 +123,8 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 + messaging.py 封装了模块间通信的功能。该文件直接运行时作为消息服务器，被其他库包含时提供消息传递接口
 + 创建 MessagingClient 时可传入服务地址，若地址为空，则使用环境变量 BILI_ARCH_MSG_ADDR 中的地址
 + 创建 MessagingClient 时设置 `allow_dummy=True`（默认），在服务不可达时将作为 *dummy* 客户端继续运行
-+ 由于目前的实现使用了Linux平台特定的功能，因此模块间消息传递只可在Linux环境下正常运作
-+ 在非Linux平台上，若 messaging.py 为可选依赖，仅消息传递无法工作，其他功能不受影响
++ 目前的实现使用了Linux/BSD平台特定的接口，因此模块间消息传递只可在这些环境下正常运作
++ 在不支持的平台上，若 messaging.py 为可选依赖，仅消息传递无法工作，其他功能不受影响
 
 ### 移植提示
 
@@ -215,7 +215,7 @@ cd /srv/http/fcgi
 pip3 install --target /srv/http/fcgi --no-compile --no-deps simple-fastcgi simple-inotify
 # httpx, websockets, brotil 也可通过pip3安装
 # pip3 install --target /srv/http/fcgi --no-compile httpx websockets brotli
-for f in constants.py fops.py runtime.py utils.py network.py messaging.py verify.py video.py
+for f in constants.py fops.py runtime.py utils.py network.py poller.py messaging.py verify.py video.py
 do
 	ln -s ../code/$f
 done
@@ -334,6 +334,7 @@ python desktop/danmaku_reaction.py -u $HOME/bili-credential.txt config/danmaku.t
 
 Some code of the project is written with the assistance of AI. See comments in each file for more info. Thanks for their great work !
 + [Copilot](https://github.com/copilot) GPT 4.1 and various models in *auto* mode
-+ [opencode](https://opencode.ai/go) [deepseek-v4-flash](https://chat.deepseek.com)
++ [opencode](https://opencode.ai/go) deepseek-v4-flash and deepseek-v4.1-flash
++ [DeepSeek chat](https://chat.deepseek.com)
 + [Github Copilot Cli](https://github.com/cli/cli)
 + [Pi](https://github.com/earendil-works/pi)

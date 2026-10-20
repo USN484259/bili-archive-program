@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# This file is written with the assistance of opencode-deepseek-v4-flash
+# This file is written with the assistance of opencode-deepseek-v4-flash and opencode-deepseek-v4.1-flash
 
 # FastCGI backend for the live transcription pipeline (the client is
 # tools/live_transcribe.py).
@@ -34,7 +34,6 @@ import signal
 import hashlib
 import logging
 import argparse
-import selectors
 import threading
 from stat import S_ISDIR
 from queue import SimpleQueue
@@ -526,7 +525,10 @@ class transcription_handler(HttpResponseMixin, FcgiHandler):
 		try:
 			info = json.loads(self.read().decode())
 			logger.trace(info)
-		except (UnicodeError, ValueError):
+			if not isinstance(info, dict):
+				raise TypeError("info is %s", type(info))
+		except (UnicodeError, ValueError, TypeError) as e:
+			logger.verbose("error in POST: %s", e)
 			return self.send_response(400)
 
 		add_list = info.pop("add", None)
@@ -606,31 +608,30 @@ class TranscriptionServer(FcgiServer):
 		self.matches = []
 		self.msg_client = MessagingClient(args.msg_addr, reconnect = 1)
 		self.hash_cache = None
-		self._wake_r, self._wake_w = os.pipe()
 		self.pending_rec = OrderedDict()
 		self.completed_rec = OrderedDict()
 		self.reload = False
 		self.clear = False
 		self.quit = False
 
-		os.set_blocking(self._wake_r, False)
-		os.set_blocking(self._wake_w, False)
-
 		logger.info("live-root %s, out-path %s", self.live_root, self.out_path)
-		logger.debug("socket %d, pipe %d %d", self.fileno(), self._wake_r, self._wake_w)
 		if args.hash:
-			logger.info("using hash %s", ' '.join(args.hash))
 			if Inotify is None:
-				logger.warning("inotify not available")
-			self.hash_cache = HashCache(args.hash)
+				logger.warning("inotify not available, media hashing disabled")
+			else:
+				logger.info("using hash %s", ' '.join(args.hash))
+				self.hash_cache = HashCache(args.hash)
+				self.add_watch(self.hash_cache, self.handle_hash)
 
 		self.watch_paths.add(self.live_root)
-		for path in (args.watch or ()):
+		for path in (args.watch or ()):		# watch_paths for bind mounts
 			logger.info("watching %s", path)
 			self.watch_paths.add(os.path.normpath(path))
 
 		self.reload_filter()
 		self.msg_client.subscribe(constants.topic.live_rec, constants.topic.live_monitor)
+		self.add_watch(self.msg_client, self.handle_message)
+
 
 	def reload_filter(self):
 		if not self.filter_path:
@@ -648,30 +649,14 @@ class TranscriptionServer(FcgiServer):
 			logger.error("cannot load filter from %s: %s", self.filter_path, str(e))
 
 
-	def _wake(self):
-		logger.debug("wakeup")
-		with suppress(OSError):
-			os.write(self._wake_w, b"x")
-
 	# override
 	def server_close(self):
-		logger.debug("closing %s", type(self).__name__)
-		self.quit = True
-		self._wake()
+		super().server_close()
+		self.msg_client.close()
+		if self.hash_cache:
+			self.hash_cache.close()
 
-		with suppress(OSError):
-			os.close(self._wake_r)
-		self._wake_r = -1
-		with suppress(OSError):
-			os.close(self._wake_w)
-		self._wake_w = -1
-		try:
-			self.msg_client.close()
-			if self.hash_cache:
-				self.hash_cache.close()
-		finally:
-			super().server_close()
-			logger.debug("closed %s", type(self).__name__)
+		logger.debug("closed %s", type(self).__name__)
 
 
 	def on_signal(self, signum, frame):
@@ -683,7 +668,8 @@ class TranscriptionServer(FcgiServer):
 		else:
 			self.quit = True
 			signal.signal(signum, signal.SIG_DFL)
-		self._wake()
+
+		self.wakeup()
 
 
 	# returns the pending and completed media as doc-root-relative URL paths with a
@@ -698,7 +684,7 @@ class TranscriptionServer(FcgiServer):
 					result.append('/' + rel_path)
 			return result
 
-		result = (make_list(rec) for rec in (self.pending_rec, self.completed_rec))
+		result = tuple(make_list(rec) for rec in (self.pending_rec, self.completed_rec))
 		logger.trace(result)
 		return result
 
@@ -744,106 +730,102 @@ class TranscriptionServer(FcgiServer):
 		return True
 
 
-	def handle_message(self):
-		logger.debug("handle message")
+	def handle_hash(self, obj):
+		assert(obj is self.hash_cache)
+		# serve_forever() does not guard watch callbacks, so an exception here
+		# must not be allowed to take down the whole service
+		try:
+			logger.debug("handle hash")
+			self.hash_cache.update()
+		except Exception:
+			logger.exception("exception in hash cache update")
+
+
+	def handle_message(self, obj):
+		assert(obj is self.msg_client)
+		try:
+			logger.debug("handle message")
+			self.msg_client.wait(0)
+			while True:
+				topic, info = self.msg_client.recv(constants.topic.live_rec, constants.topic.live_monitor)
+				logger.trace("%s %s", topic, info)
+				if not topic:
+					break
+				self.process_message(topic, info)
+
+		except Exception:
+			logger.exception("exception in handling message")
+
+
+	def process_message(self, topic, info):
 		# a live recorder announced "record-stopped"; find the media files in
 		# that folder that still lack an SRT and put them on the pending list
-		self.msg_client.wait(0)
-		while True:
-			topic, info = self.msg_client.recv(constants.topic.live_rec, constants.topic.live_monitor)
-			logger.trace("%s %s", topic, info)
-			if not topic:
+		if not isinstance(info, dict) or info.get("event", "") != "record-stopped":
+			return
+		msg_path = info.get("path")
+		logger.info("got record folder %s", msg_path)
+		rel_path = None
+		for path in self.watch_paths:
+			rel_path = get_relative_path(msg_path, path)
+			if rel_path:
 				break
-			if not isinstance(info, dict) or info.get("event", "") != "record-stopped":
-				continue
-			msg_path = info.get("path")
-			logger.info("got record folder %s", msg_path)
-			rel_path = None
-			for path in self.watch_paths:
-				rel_path = get_relative_path(msg_path, path)
-				if rel_path:
+		else:
+			logger.info("skip folder %s", msg_path)
+			return
+
+		if self.matches:
+			name = os.path.basename(rel_path)
+			logger.verbose("name %s, matching %d filters", name, len(self.matches))
+			for obj in self.matches:
+				if obj.match(name):
 					break
 			else:
-				logger.info("skip folder %s", msg_path)
-				continue
+				logger.info("filtered %s", rel_path)
+				return
 
-			if self.matches:
-				name = os.path.basename(rel_path)
-				logger.verbose("name %s, matching %d filters", name, len(self.matches))
-				for obj in self.matches:
-					if obj.match(name):
-						break
-				else:
-					logger.info("filtered %s", rel_path)
+		path = os.path.join(self.live_root, rel_path)
+		try:
+			if not os.path.isdir(path):
+				logger.verbose("not dir %s", path)
+				return
+		except OSError as e:
+			logger.verbose("cannot access %s: %s", path)
+			return
+
+		logger.info("walking record folder %s", path)
+		# walk the folder
+		with os.scandir(path) as it:
+			for entry in it:
+				logger.debug(entry.name)
+				if not entry.is_file():
 					continue
-
-			path = os.path.join(self.live_root, rel_path)
-			try:
-				if not os.path.isdir(path):
-					logger.verbose("not dir %s", path)
+				if os.path.splitext(entry.name)[1] not in allowed_media_ext:
 					continue
-			except OSError:
-				continue
-
-			logger.info("walking record folder %s", path)
-			# walk the folder
-			with os.scandir(path) as it:
-				for entry in it:
-					logger.debug(entry.name)
-					if not entry.is_file():
-						continue
-					if os.path.splitext(entry.name)[1] not in allowed_media_ext:
-						continue
-					if os.access(entry.path + ".srt", os.F_OK):
-						continue
-					logger.verbose("found media file %s", entry.name)
-					self.add_media_file(entry.path)
+				if os.access(entry.path + ".srt", os.F_OK):
+					continue
+				logger.verbose("found media file %s", entry.name)
+				self.add_media_file(entry.path)
 
 
-	def run(self):
-		logger.info("transcription server started")
-		with selectors.DefaultSelector() as sel:
-			sel.register(self, selectors.EVENT_READ)
-			sel.register(self._wake_r, selectors.EVENT_READ)
-			sel.register(self.msg_client, selectors.EVENT_READ)
+	def service_actions(self):
+		super().service_actions()
+		if self.quit:
+			logger.info("quitting")
+			# server_close() runs when the with-block exits.
+			# wait = False because we are interrupting serve_forever()
+			# itself (waiting would deadlock).
+			self.shutdown(wait = False)
+
+		if self.clear:
+			logger.info("clearing hash cache")
+			self.clear = False
 			if self.hash_cache is not None:
-				sel.register(self.hash_cache, selectors.EVENT_READ)
+				self.hash_cache.clear()
 
-			while not self.quit:
-				results = sel.select()
-				logger.trace(results)
-				if self.quit:
-					logger.info("quitting")
-					break
-				if self.clear:
-					logger.info("clearing hash cache")
-					self.clear = False
-					if self.hash_cache is not None:
-						self.hash_cache.clear()
-				if self.reload:
-					logger.info("reloading filter")
-					self.reload = False
-					self.reload_filter()
-
-				for key, ev in results:
-					try:
-						if key.fileobj is self:
-							logger.debug("event socket")
-							self._handle_request_noblock()
-						elif key.fileobj is self._wake_r:
-							logger.debug("event wakeup")
-							with suppress(OSError):
-								while os.read(self._wake_r, 0x1000):
-									pass
-						elif key.fileobj is self.msg_client:
-							logger.debug("event message")
-							self.handle_message()
-						elif key.fileobj is self.hash_cache:
-							logger.debug("event cache")
-							self.hash_cache.update()
-
-					except Exception as e:
-						logger.exception("exception in server loop")
+		if self.reload:
+			logger.info("reloading filter")
+			self.reload = False
+			self.reload_filter()
 
 
 if __name__ == "__main__":
@@ -871,4 +853,4 @@ if __name__ == "__main__":
 		signal.signal(signal.SIGUSR2, server.on_signal)
 		signal.signal(signal.SIGTERM, server.on_signal)
 		signal.signal(signal.SIGINT, server.on_signal)
-		server.run()
+		server.serve_forever()

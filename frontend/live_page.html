@@ -1,33 +1,55 @@
 <!DOCTYPE html>
+<!-- This file is written with the assistance of opencode-deepseek-v4.1-flash -->
 <html>
 <head>
 	<meta charset="utf-8"/>
 </head>
 <body>
 	<h1 id="title"></h1>
-	<label for="active_rooms">Active rooms</label>
-	<table id="active_rooms">
-		<thead>
-			<tr>
-				<th>name</th>
-				<th>title</th>
-				<th>live-time</th>
-			</tr>
-		</thead>
-		<tbody>
-		</tbody>
-	</table>
-	<label for="inactive_rooms">Inactive rooms</label>
-	<table id="inactive_rooms">
-		<thead>
-			<tr>
-				<th>name</th>
-				<th>title</th>
-			</tr>
-		</thead>
-		<tbody>
-		</tbody>
-	</table>
+	<div class="flex-container">
+		<div>
+			<span>Active rooms</span>
+			<table id="active_rooms">
+				<thead>
+					<tr>
+						<th>name</th>
+						<th>title</th>
+						<th>live-time</th>
+					</tr>
+				</thead>
+				<tbody>
+				</tbody>
+			</table>
+		</div>
+		<div>
+			<span>Inactive rooms</span>
+			<table id="inactive_rooms">
+				<thead>
+					<tr>
+						<th>name</th>
+						<th>title</th>
+					</tr>
+				</thead>
+				<tbody>
+				</tbody>
+			</table>
+		</div>
+	</div>
+	<div hidden>
+		<span>Live Transcriptions</span>
+		<table id="transcription">
+			<thead>
+				<tr>
+					<th>time</th>
+					<th>uname</th>
+					<th>title</th>
+					<th>transcription</th>
+				</tr>
+			</thead>
+			<tbody>
+			</tbody>
+		</table>
+	</div>
 	<style>
 a {
 	padding: 4px;
@@ -37,6 +59,7 @@ span {
 }
 table {
 	border-collapse: collapse;
+	flex: 1;
 }
 thead {
 	border: 1px solid;
@@ -60,31 +83,20 @@ tbody tr:nth-child(even) {
 	background-color: #eeeeee;
 }
 
-	</style>
-	<script type="module">
-import { live_status_api } from "/config.js";
-
-function live_time_str(start_time) {
-	let time_sec = Math.floor(Date.now() / 1000 - start_time)
-	let result = ""
-	if (time_sec < 0)
-		return result
-
-	if (time_sec >= 3600) {
-		result += Math.floor(time_sec / 3600) + ':'
-		time_sec %= 3600
-	}
-
-	let min = Math.floor(time_sec / 60)
-	let sec = time_sec % 60
-	result += min.toLocaleString(undefined, {minimumIntegerDigits: 2})
-		+ ':' + sec.toLocaleString(undefined, {minimumIntegerDigits: 2})
-
-	return result
+.flex-container {
+	display: flex;
+	gap: 15px;
 }
 
+	</style>
+	<script type="module">
+import * as config from "/config.js";
+let util_module = import(config.util_module);
+
 function build_live_list() {
-	fetch(live_status_api).then((resp) => resp.json()).then((live_status) => {
+	fetch(config.live_status_api).then((resp) => {
+		if (resp.ok) return resp.json(); else throw new Error(resp.statusText);
+	}).then((live_status) => {
 		console.log(live_status)
 
 		let active_tbody = document.createElement("tbody")
@@ -115,7 +127,9 @@ function build_live_list() {
 			if (status.live_status == 1) {
 				// live_time
 				let live_time_elem = document.createElement("td")
-				live_time_elem.append(live_time_str(status.live_time))
+				let live_time = Math.floor(Date.now() / 1000 - status.live_time)
+				if (live_time >= 0)
+					live_time_elem.append(util.duration_string(live_time))
 				tr_elem.append(live_time_elem)
 			}
 
@@ -136,13 +150,102 @@ function build_live_list() {
 
 		let title_elem = document.getElementById("title")
 		title_elem.innerText = "Active live rooms: " + active_count + '/' + Object.keys(live_status).length;
-	});
+	}).catch((err) => console.warn(err));
 }
 
-addEventListener("DOMContentLoaded", () => {
+// the transcription backend lists media files as doc-root-relative paths of
+// the form "/dir/uname_yy_mm_dd_hh_mm_title/time.suffix" (folder name built
+// by live_rec's make_record_name; file name is the record start POSIX time).
+function parse_transcription_path(path) {
+	let match = path.match(/^(.*\/)?([^/]+?)_(\d{2})_(\d{2})_(\d{2})_(\d{2})_(\d{2})_([^/]+)\/(\d+)\.(\w+)$/);
+	if (!match)
+		return null;
+	return {
+		"dir":	match[1] || "",
+		"uname":	match[2],
+		"title":	match[8],
+		"time":	parseFloat(match[9]),
+		"suffix":	match[10],
+	};
+}
+
+function build_transcription_list() {
+	fetch(config.transcription_api).then((resp) => {
+		if (resp.ok) return resp.json(); else throw new Error(resp.statusText);
+	}).then((transcription) => {
+		console.log(transcription);
+
+		let rows = []
+		for (const [completed, list] of [[false, transcription.pending], [true, transcription.completed]]) {
+			for (const path of list || []) {
+				let info = parse_transcription_path(path);
+				if (!info) {
+					console.warn("cannot parse transcription path", path);
+					continue;
+				}
+				rows.push(Object.assign(info, {"path": path, "completed": completed}));
+			}
+		}
+		// latest video first
+		rows.sort((a, b) => b.time - a.time);
+
+		let transcription_tbody = document.createElement("tbody");
+		for (const row of rows) {
+			let tr_elem = document.createElement("tr");
+
+			// time
+			let time_elem = document.createElement("td");
+			time_elem.append(util.localtime_string(new Date(row.time * 1000)));
+			tr_elem.append(time_elem);
+
+			// uname
+			let uname_elem = document.createElement("td");
+			uname_elem.append(row.uname);
+			tr_elem.append(uname_elem);
+
+			// title
+			let title_elem = document.createElement("td");
+			title_elem.append(row.title);
+			tr_elem.append(title_elem);
+
+			// transcription: link to the SRT viewer for completed files
+			let trans_elem = document.createElement("td");
+			if (row.completed) {
+				let link_elem = document.createElement("a");
+				// SRT is stored next to the media as "<media>.srt"
+				link_elem.setAttribute("href", config.srt_viewer_url + "?path=" + encodeURIComponent(row.path + ".srt"));
+				link_elem.setAttribute("target", "_blank");
+				link_elem.append("view");
+				trans_elem.append(link_elem);
+			}
+			tr_elem.append(trans_elem);
+
+			transcription_tbody.append(tr_elem);
+		}
+
+		let transcription_table = document.getElementById("transcription");
+		let transcription_old_tbody = transcription_table.getElementsByTagName("tbody")[0];
+		transcription_table.replaceChild(transcription_tbody, transcription_old_tbody);
+
+		let parent_div = transcription_table.parentElement;
+		parent_div.removeAttribute("hidden");
+	}).catch((err) => console.warn(err));
+}
+
+
+function update() {
 	build_live_list();
-	setInterval(build_live_list, 30 * 1000);
-});
+	build_transcription_list();
+}
+
+async function main(util) {
+	globalThis.util = util;
+
+	update();
+	setInterval(update, 30 * 1000);
+}
+
+addEventListener("DOMContentLoaded", () => util_module.then(main));
 
 	</script>
 </body>

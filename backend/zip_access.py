@@ -7,58 +7,23 @@ sys.path[0] = os.getcwd()
 import re
 import json
 import time
+import logging
 import zipfile
 import mimetypes
+import threading
 from functools import partial
+from collections import OrderedDict
 from urllib.parse import parse_qs
 from simple_fastcgi import FcgiThreadingServer, HttpResponseMixin, FcgiHandler
 
-from threading import RLock
-from collections import OrderedDict
+from poller import Timer
+from utils import logger_init
 
+ZIP_CACHE_LIMIT = 0x40
+ZIP_CLOSE_TIMEOUT = 120 * 1000
+POLL_INTERVAL_MS = 60 * 1000
 
-class lru_cache:
-	def __init__(self, func, limit = 16):
-		self.cache = OrderedDict()
-		self.limit = limit
-		self.atime = time.monotonic()
-		self.lock = RLock()
-		self.new_func = func["new"]
-		self.del_func = func["del"]
-
-	def shink(self):
-		with self.lock:
-			while len(self.cache) > self.limit:
-				k, v = self.cache.popitem(0)
-				self.del_func(k, v)
-
-	def flush(self):
-		with self.lock:
-			if len(self.cache) > 0:
-				l = self.limit
-				self.limit = 0
-				self.shink()
-				self.limit = l
-
-	def set_limit(self, limit):
-		with self.lock:
-			self.limit = limit
-			self.shink()
-
-	def get_access_time(self):
-		return self.atime
-
-	def __call__(self, arg0, *args, **kwargs):
-		with self.lock:
-			self.atime = time.monotonic()
-			if arg0 in self.cache:
-				self.cache.move_to_end(arg0)
-				return self.cache[arg0]
-			else:
-				obj = self.new_func(arg0, *args, **kwargs)
-				self.cache[arg0] = obj
-				self.shink()
-				return obj
+logger = logging.getLogger("bili-arch.zip_access")
 
 
 class zip_access_handler(HttpResponseMixin, FcgiHandler):
@@ -164,6 +129,7 @@ class zip_access_handler(HttpResponseMixin, FcgiHandler):
 
 	def handle(self):
 		try:
+			logger.debug("handler on thread %d", threading.get_native_id())
 			req_method = self.environ.get("REQUEST_METHOD")
 			if req_method not in ("GET", "HEAD"):
 				return self.send_response(405)
@@ -177,34 +143,80 @@ class zip_access_handler(HttpResponseMixin, FcgiHandler):
 			if not zip_member:
 				zip_member = "/"
 
-			archive = self.server.zip_cache(os.path.join(www_root, zip_path), mode = 'r')
+			logger.verbose("path %s, member %s", zip_path, zip_member)
+
+			archive = self.server.get(os.path.join(www_root, zip_path))
 			if zip_member.endswith('/'):
 				self.handle_dir(archive, zip_member.rstrip('/'))
 			else:
 				self.handle_file(archive, zip_member)
 
 		except Exception as e:
+			logger.notice("error in handle %s %s: %s", zip_path, zip_member, e)
 			return self.send_response(404)
 
 
 class ZipAccessServer(FcgiThreadingServer):
+	class Record:
+		def __init__(self, path):
+			logger.info("opening %s", path)
+			self.path = path
+			self.archive = zipfile.ZipFile(path, mode = 'r')
+			self.atime = time.monotonic()
+
+		def close(self):
+			logger.info("closing %s", self.path)
+			self.archive.close()
+
 	def __init__(self, handler):
 		super().__init__(handler)
+		self.lock = threading.RLock()
+		self.zip_cache = OrderedDict()
+		self.timer = Timer()
+		self.add_watch(self.timer, lambda obj: obj.drain())
 
-		def zip_close_func(path, obj):
-			obj.close()
+	def _shrink(self):
+		# lock already held
+		while len(self.zip_cache) > ZIP_CACHE_LIMIT:
+			path, rec = self.zip_cache.popitem(0)
+			rec.close()
 
-		self.zip_cache = lru_cache({
-			"new":	zipfile.ZipFile,
-			"del":	zip_close_func
-		})
+	def get(self, path):
+		with self.lock:
+			needs_timer = bool(self.zip_cache)
+			rec = self.zip_cache.get(path)
+			if rec is not None:
+				rec.atime = time.monotonic()
+			else:
+				rec = Record(path)
+				self.zip_cache[path] = rec
+
+			self.zip_cache.move_to_end(path)
+			self._shrink()
+
+		if needs_timer:		# previously no open zip file, start timer
+			logger.verbose("start timer")
+			self.timer.settime(POLL_INTERVAL_MS, repeat = True)
+		return rec.archive
 
 	def service_actions(self):
 		super().service_actions()
 		cur_time = time.monotonic()
-		if cur_time - self.zip_cache.get_access_time() > 30:
-			self.zip_cache.flush()
+		with self.lock:
+			while self.zip_cache:
+				rec = next(iter(self.zip_cache.values()))
+				if rec.atime + ZIP_CLOSE_TIMEOUT >= cur_time:
+					return
+				path, r = self.zip_cache.popitem(0)
+				assert(r is rec)
+				rec.close()
 
-with ZipAccessServer(zip_access_handler) as server:
-	server.serve_forever(poll_interval = 60)
+		# all zip files closed, cancel timer
+		logger.verbose("stop timer")
+		self.timer.cancel()
+
+if __name__ == "__main__":
+	logger_init()
+	with ZipAccessServer(zip_access_handler) as server:
+		server.serve_forever()
 

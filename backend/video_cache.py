@@ -16,10 +16,15 @@ from contextlib import suppress
 from simple_fastcgi import FcgiServer, HttpResponseMixin, FcgiHandler
 
 from utils import logger_init
+from poller import Timer
+from messaging import MessagingClient
 
 # constants
 
 import constants
+
+POLL_INTERVAL_MS = 10 * 1000
+MSG_RECONNECT_INTERVAL = 10
 
 # static objects
 
@@ -69,7 +74,7 @@ class BVDownloader:
 		done_bvid = None
 
 		if not self.queue:
-			return
+			return False
 
 		try:
 			if self.pipe[0].poll():
@@ -112,6 +117,8 @@ class BVDownloader:
 		if done_bvid and callable(self.db_func):
 			logger.debug("db callback for %s", done_bvid)
 			self.db_func(done_bvid)
+
+		return bool(self.queue)
 
 
 	def schedule(self, bvid, args = {}):
@@ -240,20 +247,45 @@ class bv_play_handler(HttpResponseMixin, FcgiHandler):
 
 
 class BVPlayServer(FcgiServer):
-	def __init__(self, handler, cache_root, db_path, max_duration, args):
+	def __init__(self, handler, cache_root, /, db_path, msg_client, walk, max_duration, args):
 		FcgiServer.__init__(self, handler)
 		self.max_duration = max_duration
+		self.bv_downloader = BVDownloader(cache_root, self.handle_db_update, args)
+		self.database = None
+		self.need_walk = False
+		self.timer = Timer()
+		self.msg_client = None
+
 		if db_path:
 			from video_database import VideoDatabaseManager
 			self.database = VideoDatabaseManager(cache_root, db_path)
-			self.need_walk = True
+			self.need_walk = walk
 			signal.signal(signal.SIGUSR1, self.sig_walk)
 
-		self.bv_downloader = BVDownloader(cache_root, self.handle_db_update, args)
+		self.add_watch(self.timer, lambda obj: obj.drain())
+		if msg_client:
+			if db_path:
+				self.msg_client = msg_client
+				self.add_watch(self.msg_client, self.handle_message)
+			else:
+				logger.notice("no database, closing msg_client")
+				msg_client.close()
+
 
 	def sig_walk(self, signum, frame):
 		logger.info("signal walk")
 		self.need_walk = True
+		self.wakeup()
+
+
+	def __enter__(self):
+		res = super().__enter__()
+		if self.database is not None:
+			signal.signal(signal.SIGUSR1, self.sig_walk)
+			if self.need_walk:
+				self.wakeup()
+		return res
+
 
 	def handle_db_update(self, bvid):
 		if not self.database:
@@ -265,12 +297,60 @@ class BVPlayServer(FcgiServer):
 		except Exception:
 			logger.exception("failed in updating database for %s", bvid)
 
+
+	def handle_flags(self, info):
+		path = info.get("path")
+		if not (isinstance(path, str) and os.path.realpath(path) == self.database.get_root()):
+			logger.verbose("ignore path %s", path)
+			return
+
+		action = info.get("action")
+		if action != "flags":
+			logger.verbose("path %s, ignore action %s", path, action)
+			return
+
+		bv_list = info.get("bv_list")
+		add_flags = info.get("add", [])
+		del_flags = info.get("del", [])
+
+		is_str_list = lambda obj: isinstance(obj, list) and all(isinstance(item, str) for item in obj)
+
+		if not (is_str_list(bv_list) and is_str_list(add_flags) and is_str_list(del_flags) and
+			bv_list and (add_flags or del_flags)):
+			logger.notice("invalid database message %s", str(info))
+			return
+
+		logger.verbose("updating flags, path %s", path)
+		self.database.set_flags(bv_list, add_flags, del_flags)
+
+
+	def handle_message(self, obj):
+		assert(obj is self.msg_client)
+		try:
+			self.msg_client.wait(0)
+			while True:
+				topic, info = self.msg_client.recv()
+				if not topic:
+					break
+				if not isinstance(info, dict):
+					continue
+				if topic != constants.topic.database:
+					logger.warning("unexpected topic %s", topic)
+					continue
+
+				self.handle_flags(info)
+
+		except Exception:
+			logger.exception("exception in handle_message")
+
+
 	def schedule(self, bvid, args):
 		result = self.bv_downloader.schedule(bvid, args)
 		if result:
 			return {
 				"scheduled": bvid
 			}
+
 
 	def cancel(self, bvid):
 		result = self.bv_downloader.cancel(bvid)
@@ -279,12 +359,16 @@ class BVPlayServer(FcgiServer):
 				"cancelled": bvid
 			}
 
+
 	def status(self, since = None):
 		return self.bv_downloader.status(since or 0)
 
+
 	def service_actions(self):
 		super().service_actions()
-		self.bv_downloader.update()
+		if self.bv_downloader.update():
+			self.timer.settime(POLL_INTERVAL_MS)
+
 		if self.need_walk:
 			logger.info("walking video cache")
 			try:
@@ -292,12 +376,15 @@ class BVPlayServer(FcgiServer):
 			finally:
 				self.need_walk = False
 
+
 # entrance
 
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--path", required = True)
 	parser.add_argument("--database")
+	parser.add_argument("--walk", action = "store_true")
+	parser.add_argument("--msg-addr")
 	parser.add_argument("--max-duration", type = int)
 	parser.add_argument("-v", "--verbose", action = "count", default = 0)
 	parser.add_argument("args", nargs = '*')
@@ -305,7 +392,7 @@ if __name__ == "__main__":
 	args = parser.parse_args()
 	logger_init(args.verbose)
 
-	logger.info("cache at %s, database %s, max_duration %s", args.path, str(args.database), str(args.max_duration))
+	logger.info("cache at %s, database %s, max_duration %s, msg_addr %s", args.path, args.database, args.max_duration, args.msg_addr)
 	cache_path = os.path.realpath(args.path)
 	os.makedirs(cache_path, exist_ok = True)
 	if args.database:
@@ -314,5 +401,10 @@ if __name__ == "__main__":
 			db_path = os.path.realpath(db_path)
 			os.makedirs(db_path, exist_ok = True)
 
-	with BVPlayServer(bv_play_handler, args.path, args.database, args.max_duration, args.args) as server:
-		server.serve_forever(poll_interval = 10)
+	msg_client = None
+	if args.msg_addr:
+		msg_client = MessagingClient(args.msg_addr, reconnect = MSG_RECONNECT_INTERVAL)
+		msg_client.subscribe(constants.topic.database)
+
+	with BVPlayServer(bv_play_handler, args.path, db_path = args.database, msg_client = msg_client, walk = args.walk, max_duration = args.max_duration, args = args.args) as server:
+		server.serve_forever()

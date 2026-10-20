@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# This file is written with the assistance of opencode-deepseek-v4-flash
+# This file is written with the assistance of opencode-deepseek-v4-flash and opencode-deepseek-v4.1-flash
 
 import os
 import sys
@@ -22,6 +22,7 @@ from utils import logger_init
 # constants
 
 cmp_pattern = re.compile(r"\s*([<=>]=?|<>|!=)?\s*(\d+)\s*")
+flag_pattern = re.compile(r"\w+")
 
 ## sql helper functions
 def make_sql_column_def(desc, extra = None):
@@ -117,6 +118,7 @@ query_keys = {
 	"bvid": ("==", " OR "),
 	"title": ("LIKE", " OR "),
 	"tags": ("LIKE", " OR "),
+	"flags": ("LIKE", " OR "),
 	"uname": ("LIKE", " OR "),
 	"uid": ("==", " OR "),
 	"desc": ("LIKE", " OR "),
@@ -181,6 +183,17 @@ class VideoDatabase:
 		self.database = None
 		# assert(sqlite3.threadsafety == 3)
 		self.database = self.connect(db_file)
+		try:
+			rows = self.database.execute("PRAGMA quick_check").fetchall()
+			problems = tuple(row[0] for row in rows)
+			if len(problems) == 1 and problems[0] == 'ok':
+				pass
+			else:
+				logger.warning("%s: %s", db_file, "; ".join(problems))
+		except Exception:
+			self.database.close()
+			raise
+
 		self.database.row_factory = VideoDatabase.dict_factory
 
 
@@ -201,6 +214,13 @@ class VideoDatabase:
 			finally:
 				self.database = None
 
+	def get_root(self):
+		cursor = self.database.cursor()
+		try:
+			cursor.execute("SELECT root FROM %s" % meta_table_name)
+			return cursor.fetchone()["root"]
+		finally:
+			cursor.close()
 
 	def query(self, rules = {}):
 		logger.trace("query %s", rules)
@@ -292,7 +312,7 @@ class VideoDatabase:
 
 
 	def load_info_db(self, cursor, bvid):
-		cursor.execute("SELECT * FROM %s WHERE bvid = ?" % video_table_name, (bvid, ))
+		cursor.execute("SELECT * FROM %s WHERE bvid == ?" % video_table_name, (bvid, ))
 		bv_info = cursor.fetchone()
 		if not bv_info:
 			return None
@@ -310,14 +330,18 @@ class VideoDatabase:
 		}
 
 
-	def get_video(self, bvid):
-		if not constants.bvid_pattern.fullmatch(bvid):
-			raise KeyError("invalid bvid %s" % bvid)
+	def get_video(self, bv_list):
+		logger.verbose("get_video for %d bvid", len(bv_list))
 		cursor = self.database.cursor()
+		result = {}
 		try:
-			# cursor.arraysize = 0x40
-			return self.load_info_db(cursor, bvid)
-
+			for bvid in bv_list:
+				logger.debug("get_video %s", bvid)
+				if not constants.bvid_pattern.fullmatch(bvid):
+					logger.notice("invalid bvid %s", bvid)
+					continue
+				result[bvid] = self.load_info_db(cursor, bvid)
+			return result
 		finally:
 			cursor.close()
 
@@ -484,9 +508,12 @@ class VideoDatabaseManager(VideoDatabase):
 				cursor.execute("ROLLBACK")
 				return False
 
-			db_bv_info["mtime"] = json_bv_info["mtime"]
+			# copy db-only fields
 			json_bv_info["size"] = db_bv_info["size"]
 			json_bv_info["flags"] = db_bv_info["flags"]
+
+			# sync mtime for comparation
+			db_bv_info["mtime"] = json_bv_info["mtime"]
 			if db_bv_info != json_bv_info:
 				self.store_bv_info(cursor, json_bv_info)
 
@@ -588,6 +615,52 @@ class VideoDatabaseManager(VideoDatabase):
 			return True
 		except Exception:
 			logger.error("exception in removing video %s", bvid)
+			cursor.execute("ROLLBACK")
+			raise
+		finally:
+			cursor.close()
+
+	def set_flags(self, bv_list, add_flags = [], del_flags = []):
+		logger.verbose("set_flags for %d videos", len(bv_list))
+		logger.debug("bv_list: %s", ' '.join(bv_list))
+		def check_flag(flag_list):
+			for flag in flag_list:
+				if not flag_pattern.fullmatch(flag):
+					raise ValueError("invalid flag %s" % flag)
+			return frozenset(flag_list)
+
+		add_flags = check_flag(add_flags)
+		logger.debug("add_flags: %s", ' '.join(add_flags))
+		del_flags = check_flag(del_flags)
+		logger.debug("del_flags: %s", ' '.join(del_flags))
+
+		if add_flags & del_flags:
+			raise ValueError("add_flags and del_flags intersect")
+
+		cursor = self.database.cursor()
+		try:
+			cursor.execute("BEGIN DEFERRED")
+			for bvid in bv_list:
+				cursor.execute("SELECT flags FROM %s WHERE bvid == ?" % video_table_name, (bvid, ))
+				row = cursor.fetchone()
+				if row is None:
+					logger.notice("flags: skipping %s", bvid)
+					continue
+				# flags is NULL until a video gets its first flag
+				old_flags = row["flags"] or ""
+				flags = set(old_flags.split())
+				flags |= add_flags
+				flags -= del_flags
+				flags_str = ' '.join(sorted(flags))
+				logger.verbose("%s: %s => %s", bvid, old_flags, flags_str)
+				try:
+					cursor.execute("UPDATE OR FAIL %s SET flags = ? WHERE bvid == ?" % video_table_name, (flags_str, bvid))
+				except sqlite3.IntegrityError as e:
+					logger.error("cannot update flags for %s: %s", bvid, e)
+
+			cursor.execute("COMMIT")
+		except Exception as e:
+			logger.error("exception in set_flags: %s", e)
 			cursor.execute("ROLLBACK")
 			raise
 		finally:

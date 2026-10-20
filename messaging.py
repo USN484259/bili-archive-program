@@ -4,7 +4,6 @@
 
 import os
 import re
-import time
 import struct
 import socket
 import logging
@@ -12,13 +11,12 @@ import select
 from json import dumps as json_dumps, loads as json_loads
 from contextlib import suppress
 from collections import namedtuple
+from poller import *
 from fops import create_unix_socket
 
 # constants
 recv_bufsize = 0x10000
 retry_count = 1
-ns_in_ms = 1000*1000
-ns_in_sec = 1000 * 1000 * 1000
 
 
 # static objects
@@ -34,302 +32,6 @@ msg_handler = {
 }
 
 msg_env_addr = os.environ.get("BILI_ARCH_MSG_ADDR")
-
-
-# find out timerfd API for Python < 3.13 and OS that support it but not exposed by Python
-
-timerfd_create = None
-timerfd_settime_ns = None
-
-if hasattr(os, "timerfd_create"):
-	timerfd_create = os.timerfd_create
-	timerfd_settime_ns = os.timerfd_settime_ns
-
-elif not hasattr(select, "kqueue"):	# only use timerfd if kqueue is not present
-	with suppress(Exception):
-		import ctypes
-		import ctypes.util
-		import errno
-
-		class timespec(ctypes.Structure):
-			_fields_ = (("tv_sec", ctypes.c_time_t), ("tv_nsec", ctypes.c_int64))
-
-		class itimerspec(ctypes.Structure):
-			_fields_ = (("it_interval", timespec), ("it_value", timespec))
-
-		c_itimerspec_p = ctypes.POINTER(itimerspec)
-
-		def check_result(result):
-			if result < 0:
-				errno = ctypes.get_errno()
-				err_str = ""
-				with suppress(ValueError):
-					err_str = os.strerror(errno)
-
-				raise OSError(errno, err_str)
-			return result
-
-		libc_path = ctypes.util.find_library('c') or 'libc.so.6'
-		libc_instance = ctypes.CDLL(libc_path, use_errno = True)
-
-		raw_timerfd_create = libc_instance.timerfd_create
-		raw_timerfd_create.argtypes = (ctypes.c_int, ctypes.c_int)
-		raw_timerfd_create.restype = check_result
-		raw_timerfd_settime = libc_instance.timerfd_settime
-		raw_timerfd_settime.argtypes = (ctypes.c_int, ctypes.c_int, c_itimerspec_p, c_itimerspec_p)
-
-		def timerfd_create(clockid, /, flags = 0):
-			return raw_timerfd_create(clockid, flags)
-
-		def timerfd_settime_ns(fd, /, flags = 0, initial = 0, interval = 0):
-			if initial < 0:
-				raise OSError(errno.EINVAL)
-
-			old_ts = itimerspec()
-			new_ts = itimerspec(timespec(interval // ns_in_sec, interval % ns_in_sec),
-					timespec(initial // ns_in_sec, initial % ns_in_sec))
-			raw_timerfd_settime(fd, flags, ctypes.byref(new_ts), ctypes.byref(old_ts))
-
-			return (old_ts.it_value.tv_sec * ns_in_sec + old_ts.it_value.tv_nsec,
-				old_ts.it_interval.tv_sec * ns_in_sec + old_ts.it_interval.tv_nsec)
-
-
-# OS specific poll/timer implementation
-
-class DummyPoller:
-	def __init__(self, /, oneshot):
-		logger.debug("creating %s %x", type(self).__name__, id(self))
-		self.poll = select.poll()
-		self._pipe_r, self._pipe_w = os.pipe()
-		logger.trace("pipe %d %d", self._pipe_r, self._pipe_w)
-		self.poll.register(self._pipe_r, select.POLLIN)
-
-	def close(self):
-		logger.debug("closing %s %x", type(self).__name__, id(self))
-		for fd in (self._pipe_r, self._pipe_w):
-			if fd >= 0:
-				with suppress(OSError):
-					os.close(fd)
-		self._pipe_r = -1
-		self._pipe_w = -1
-
-	def fileno(self):
-		return self._pipe_r
-
-	def register(self, fd):
-		pass
-
-	def rearm(self, fd):
-		pass
-
-	def unregister(self, fd):
-		pass
-
-	def poll(self, timeout = None):
-		logger.trace("poll %s", timeout)
-		self.poll.poll(timeout and int(timeout * 1000))
-		return tuple()
-
-	@staticmethod
-	def is_dummy():
-		return True
-
-	@staticmethod
-	def parse_event(ev):
-		pass
-
-
-class DummyTimer:
-	def __init__(self, poller):
-		logger.debug("creating %s %x", type(self).__name__, id(self))
-
-	def close(self):
-		logger.debug("closing %s %x", type(self).__name__, id(self))
-
-	def settime(self, ms):
-		pass
-
-	def cancel(self):
-		pass
-
-	def check_event(self, fd, ev):
-		return False
-
-
-Poller = DummyPoller
-Timer  = DummyTimer
-
-
-if hasattr(select, "epoll"):
-	class EpollPoller:
-		def __init__(self, /, oneshot):
-			logger.debug("creating %s %x", type(self).__name__, id(self))
-			self.epoll = select.epoll()
-			self.epoll_mask = select.EPOLLIN | select.EPOLLRDHUP | (oneshot and select.EPOLLONESHOT or 0)
-			logger.trace("epoll fd %d, mask %x", self.epoll.fileno(), self.epoll_mask)
-
-		def close(self):
-			logger.debug("closing %s %x", type(self).__name__, id(self))
-			try:
-				if self.epoll is not None:
-					self.epoll.close()
-			finally:
-				self.epoll = None
-
-		def fileno(self):
-			return self.epoll.fileno()
-
-		def register(self, fd):
-			logger.trace("epoll register %d", fd)
-			self.epoll.register(fd, self.epoll_mask)
-
-		def rearm(self, fd):
-			logger.trace("epoll rearm %d", fd)
-			self.epoll.modify(fd, self.epoll_mask)
-
-		def unregister(self, fd):
-			logger.trace("epoll unregister %d", fd)
-			with suppress(KeyError, OSError):
-				self.epoll.unregister(fd)
-
-		def poll(self, timeout = None):
-			logger.trace("epoll poll %s", timeout)
-			events = self.epoll.poll(timeout)
-			logger.trace(events)
-			return events
-
-		@staticmethod
-		def is_dummy():
-			return False
-
-		@staticmethod
-		def parse_event(ev):
-			if ev & select.EPOLLRDHUP:
-				return "eof"
-			if ev & select.EPOLLERR:
-				return "err"
-
-
-	Poller = EpollPoller
-
-
-if timerfd_create and timerfd_settime_ns:
-	class TimerfdTimer:
-		def __init__(self, poller):
-			logger.debug("creating %s %x", type(self).__name__, id(self))
-			self.poller = poller
-			self.timerfd = timerfd_create(time.CLOCK_MONOTONIC)
-			self.poller.register(self.timerfd)
-			logger.trace("timerfd %d, poller %d", self.timerfd, self.poller.fileno())
-
-		def close(self):
-			logger.debug("closing %s %x", type(self).__name__, id(self))
-			if self.timerfd is not None:
-				with suppress(OSError):
-					self.poller.unregister(self.timerfd)
-					os.close(self.timerfd)
-				self.timerfd = None
-
-		def settime(self, ms):
-			logger.trace("timerfd settime %d", ms)
-			timerfd_settime_ns(self.timerfd, initial = ms * ns_in_ms)
-
-		def cancel(self):
-			logger.trace("timerfd cancel")
-			timerfd_settime_ns(self.timerfd)
-
-		def check_event(self, fd, ev):
-			if fd != self.timerfd:
-				return False
-			logger.trace("timerfd timer")
-			with suppress(OSError):
-				os.read(self.timerfd, 8)
-			return True
-
-
-	Timer = TimerfdTimer
-
-
-if hasattr(select, "kqueue"):
-	class KqueuePoller:
-		def __init__(self, /, oneshot):
-			logger.debug("creating %s %x", type(self).__name__, id(self))
-			self.kqueue = select.kqueue()
-			self.kqueue_flags = select.KQ_EV_ADD | (oneshot and select.KQ_EV_CLEAR or 0)
-			logger.trace("kqueue fd %d, flags %x", self.kqueue.fileno(), self.kqueue_flags)
-
-		def close(self):
-			logger.debug("closing %s %x", type(self).__name__, id(self))
-			try:
-				if self.kqueue is not None:
-					self.kqueue.close()
-			finally:
-				self.kqueue = None
-
-		def fileno(self):
-			return self.kqueue.fileno()
-
-		def register(self, fd):
-			logger.trace("kqueue register %d", fd)
-			self.kqueue.control([select.kevent(fd, filter = select.KQ_FILTER_READ, flags = self.kqueue_flags)], 0, 0)
-
-		def rearm(self, fd):
-			logger.trace("kqueue rearm %d", fd)
-			pass
-
-		def unregister(self, fd):
-			logger.trace("kqueue unregister %d", fd)
-			with suppress(OSError):
-				self.kqueue.control([select.kevent(fd, filter = select.KQ_FILTER_READ, flags = select.KQ_EV_DELETE)], 0, 0)
-
-		def poll(self, timeout = None):
-			logger.trace("kqueue poll %s", timeout)
-			events = self.kqueue.control(None, 0x10, timeout)
-			logger.trace(events)
-			return [(ev.ident, ev.flags) for ev in events if ev.filter in (select.KQ_FILTER_READ, select.KQ_FILTER_TIMER)]
-
-		@staticmethod
-		def is_dummy():
-			return False
-
-		@staticmethod
-		def parse_event(ev):
-			if ev & select.KQ_EV_EOF:
-				return "eof"
-			if ev & select.KQ_EV_ERROR:
-				return "err"
-
-
-	class KqueueTimer:
-		timer_id = 0xCDCDCDCD
-		def __init__(self, poller):
-			logger.debug("creating %s %x", type(self).__name__, id(self))
-			self.kqueue = poller.kqueue
-			self.flags = select.KQ_EV_ADD | ((poller.kqueue_flags & select.KQ_EV_CLEAR) and select.KQ_EV_ONESHOT or 0)
-
-		def close(self):
-			logger.debug("closing %s %x", type(self).__name__, id(self))
-			self.cancel()
-
-		def settime(self, ms):
-			logger.trace("kqueue settime %d", ms)
-			self.kqueue.control([select.kevent(self.timer_id, filter = select.KQ_FILTER_TIMER, data = ms, flags = self.flags)], 0, 0)
-
-		def cancel(self):
-			logger.trace("kqueue cancel")
-			with suppress(OSError):
-				self.kqueue.control([select.kevent(self.timer_id, filter = select.KQ_FILTER_TIMER, flags = select.KQ_EV_DELETE)], 0, 0)
-
-		def check_event(self, fd, ev):
-			if fd == self.timer_id:
-				logger.trace("kqueue timer")
-				return True
-			else:
-				return False
-
-
-	Poller = KqueuePoller
-	Timer = KqueueTimer
 
 
 # server
@@ -357,7 +59,7 @@ class BaseServer:
 		self.conn = self.on_create(*args, **kwargs)
 		self.client_map = {}
 		self.can_accept = True
-		self.poller = Poller(oneshot = True)
+		self.poller = Poller(edge = True)
 		self.conn.setblocking(False)
 		self.poller.register(self.conn)
 
@@ -388,10 +90,7 @@ class BaseServer:
 		return self.poller.fileno()
 
 	def is_dummy(self):
-		return self.poller.is_dummy()
-
-	def on_poll_init(self, /, oneshot):
-		raise NotImplementedError()
+		return self.poller.dummy
 
 	def on_create(self, *args):
 		raise NotImplementedError()
@@ -670,6 +369,7 @@ class MessagingServer(BaseServer):
 	def forward_message(self, client, topic, data):
 		logger.debug("topic %s, client %s (%d), subscription %s", topic, client.name, client.fileno(), ' '.join(client.subscriptions))
 		if '*' in client.subscriptions or topic in client.subscriptions:
+			logger.verbose("forwarding to client %s (%d)", client.name, client.fileno())
 			self.send(client, data)
 
 
@@ -744,13 +444,13 @@ class MessagingClient:
 
 	def __init__(self, addr = None, /, allow_dummy = True, *, reconnect = None):
 		logger.debug("creating %s %x", type(self).__name__, id(self))
-		if reconnect and Timer is DummyTimer:
+		if reconnect and Timer.dummy:
 			logger.warning("no timer support on this platform, reconnect do not work")
 
 		self.msg_addr = addr or msg_env_addr
 		self.allow_dummy = allow_dummy
 		self.reconnect_ms = reconnect and int(reconnect * 1000)
-		self.poller = Poller(oneshot = False)
+		self.poller = Poller(edge = False)
 		self.timer = reconnect and Timer(self.poller)
 		self.conn = None
 		self.last_connected = False
@@ -821,17 +521,19 @@ class MessagingClient:
 				self.conn.close()
 			self.conn = None
 
+
 	def fileno(self):
 		return self.poller.fileno()
 
 	def is_dummy(self):
-		return self.poller.is_dummy()
+		return self.poller.dummy
 
 	def __enter__(self):
 		return self
 
 	def __exit__(self, *args):
 		self.close()
+
 
 	def _send_out(self, payload, caller):
 		retry = 0
@@ -852,6 +554,7 @@ class MessagingClient:
 				return rc
 
 		return False
+
 
 	def _do_subscribe(self):
 		logger.verbose("subscribing %s", self.subscription)
@@ -948,6 +651,7 @@ class MessagingClient:
 					except Exception as e:
 						logger.warning("bad message: %s", str(e))
 
+
 	def wait(self, timeout = None):
 		logger.debug("waiting %s", timeout)
 		self.check_connection()
@@ -957,6 +661,7 @@ class MessagingClient:
 
 			if self.timer and self.timer.check_event(fd, ev):
 				logger.verbose("reconnect timer")
+				self.timer.drain()
 				with suppress(Exception):
 					self.check_connection()
 				continue

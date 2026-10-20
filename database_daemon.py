@@ -49,9 +49,9 @@ class DatabaseDaemon:
 		self.quitting = False
 		self.needs_walk = False
 
-		self.watch_paths.add(os.path.normpath(video_root))
-		for path in (watch_paths or ()):
-			self.watch_paths.add(os.path.normpath(path))
+		self.watch_paths.add(os.path.realpath(video_root))
+		for path in (watch_paths or ()):	# watch_paths for bind mounts
+			self.watch_paths.add(os.path.realpath(path))
 		logger.debug("db %s, path %s, watching %s", database, video_root, ' '.join(self.watch_paths))
 		# self-pipe (POSIX) to wake the main loop from a signal handler
 		self._wake_r, self._wake_w = os.pipe()
@@ -80,13 +80,13 @@ class DatabaseDaemon:
 			os.write(self._wake_w, b"x")
 
 
-	def _schedule_task(self, task = "wakeup"):
+	def _schedule_task(self, task, *param):
 		size = self.queue.qsize()
 		logger.debug("queue %d, task %s", size, task)
 		if size >= QUEUE_MAX_SIZE:
 			logger.warning("queue full %d, dropping %s", size, str(task))
 		else:
-			self.queue.put_nowait(task)
+			self.queue.put_nowait((task, param))
 
 
 	def handle_event(self):
@@ -100,7 +100,47 @@ class DatabaseDaemon:
 		if self.quitting:
 			logger.info("quitting")
 
-		self._schedule_task()
+		self._schedule_task("wakeup")
+
+
+	def handle_video_update(self, info):
+		path = info.get("path")
+		bvid = info.get("bvid")
+		if not (isinstance(path, str) and isinstance(bvid, str) and constants.bvid_pattern.fullmatch(bvid)):
+			logger.notice("invalid video message: %s %s", str(path), str(bvid))
+			return
+		done = info.get("done")
+		logger.verbose("video %s, path %s, done %s", bvid, path, str(done))
+		if not done or os.path.realpath(path) not in self.watch_paths:
+			return
+		logger.verbose("scheduling video update %s", bvid)
+		self._schedule_task("video", bvid)
+
+
+	def handle_database_update(self, info):
+		path = info.get("path")
+		if not (isinstance(path, str) and os.path.realpath(path) in self.watch_paths):
+			logger.verbose("ignore path %s", path)
+			return
+
+		action = info.get("action")
+		if action != "flags":
+			logger.verbose("path %s, ignore action %s", path, action)
+			return
+
+		bv_list = info.get("bv_list")
+		add_flags = info.get("add", [])
+		del_flags = info.get("del", [])
+
+		is_str_list = lambda obj: isinstance(obj, list) and all(isinstance(item, str) for item in obj)
+
+		if not (is_str_list(bv_list) and is_str_list(add_flags) and is_str_list(del_flags) and
+			bv_list and (add_flags or del_flags)):
+			logger.notice("invalid database message %s", str(info))
+			return
+		logger.verbose("scheduling flags update, path %s", path)
+		self._schedule_task("flags", bv_list, add_flags, del_flags)
+
 
 	def handle_message(self):
 		try:
@@ -108,23 +148,18 @@ class DatabaseDaemon:
 
 			# drain pending messages
 			while True:
-				topic, info = self.msg_client.recv(constants.topic.video)
+				topic, info = self.msg_client.recv()
 				logger.trace("%s: %s", topic, info)
 				if not topic:
 					break
 				if not isinstance(info, dict):
-					return
-				path = info.get("path")
-				bvid = info.get("bvid")
-				if not (isinstance(path, str) and isinstance(bvid, str) and constants.bvid_pattern.fullmatch(bvid)):
-					logger.warning("invalid video message: %s %s", str(path), str(bvid))
-					return
-				done = info.get("done")
-				logger.verbose("video %s, path %s, done %s", bvid, path, str(done))
-				if not done or os.path.normpath(path) not in self.watch_paths:
-					return
-				logger.verbose("scheduling database update %s", bvid)
-				self._schedule_task(bvid)
+					continue
+				if topic == constants.topic.video:
+					self.handle_video_update(info)
+				elif topic == constants.topic.database:
+					self.handle_database_update(info)
+				else:
+					logger.warning("unexpected topic %s", topic)
 		except Exception:
 			logger.exception("exception in handle_message")
 
@@ -158,10 +193,20 @@ class DatabaseDaemon:
 					finally:
 						self.needs_walk = False
 				else:
-					bvid = item
-					logger.info("updating %s", bvid)
-					if self.database.update_video(bvid):
-						self.database.update_video_size(bvid)
+					(task, param) = item
+					if task == "wakeup":
+						pass
+					elif task == "video":
+						bvid = param[0]
+						logger.info("updating video %s", bvid)
+						if self.database.update_video(bvid):
+							self.database.update_video_size(bvid)
+					elif task == "flags":
+						logger.info("updating flags")
+						self.database.set_flags(*param)
+					else:
+						logger.warning("unexpected task %s", task)
+
 			except Exception as e:
 				logger.exception("exception on updating %s", item)
 
@@ -171,7 +216,7 @@ class DatabaseDaemon:
 	def close(self):
 		logger.verbose("closing")
 		self.quitting = True
-		self._schedule_task()
+		self._schedule_task("wakeup")
 		self._wake()
 		if self.worker is not None:
 			with suppress(Exception):
@@ -206,7 +251,7 @@ class DatabaseDaemon:
 		signal.signal(signal.SIGTERM, self.on_signal)
 		signal.signal(signal.SIGINT, self.on_signal)
 
-		self.msg_client.subscribe(constants.topic.video)
+		self.msg_client.subscribe(constants.topic.video, constants.topic.database)
 
 		self.worker = threading.Thread(target = self.worker_func, daemon = True)
 		self.worker.start()
