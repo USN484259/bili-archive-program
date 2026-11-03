@@ -37,7 +37,7 @@ def mkdir(path):
 	os.makedirs(path, exist_ok = True)
 
 
-def locked_file(filename, mode, **kwargs):
+def locked_file(filename, /, mode, **kwargs):
 	f = open(filename, mode = mode, **kwargs)
 	if 'r' in mode and '+' not in mode:
 		lock_mode = fcntl.LOCK_SH
@@ -56,7 +56,7 @@ class staged_file:
 	def __init__(self, filename, /, mode = 'r', rotate = None, **kwargs):
 		self.filename = filename
 		self.tmp_name = None
-		self.rot_mode = bool(rotate)
+		self.rot_mode = rotate in ("<", "rev", "inv") and '<' or (rotate and '>' or '')
 		open_mode = mode
 		if 'w' in mode:
 			self.tmp_name = filename + default_names.tmp_ext
@@ -87,30 +87,39 @@ class staged_file:
 			if replace and self.tmp_name:
 				if self.rot_mode:
 					self.rotate()
-				logger.debug("move %s to %s", self.tmp_name, self.filename)
-				os.replace(self.tmp_name, self.filename)
+				if self.rot_mode != '<':
+					logger.debug("move %s to %s", self.tmp_name, self.filename)
+					os.replace(self.tmp_name, self.filename)
 		finally:
 			self.f.close()
 			self.closed = True
 
 	def rotate(self):
 		try:
-			src_fd = locked_file(self.filename, "rb")
+			orig_fobj = locked_file(self.filename, "rb")
 		except FileNotFoundError:
+			logger.verbose("reset rot_mode from %s", self.rot_mode)
+			self.rot_mode = ''
 			return
 
+		if self.rot_mode == '<':
+			src_fobj = self.f
+			src_fobj.seek(0)
+		else:
+			src_fobj = orig_fobj
+
 		try:
-			logger.debug("rotating %s", self.filename)
+			logger.debug("rotating %s, mode %s", self.filename, self.rot_mode)
 			rotate_name = self.filename + default_names.rotate_postfix
 			touch(rotate_name)
 			with locked_file(rotate_name, "r+b") as arch_fd:
 				with zipfile.ZipFile(arch_fd, mode = "a") as archive:
-					stat = os.stat(src_fd.fileno())
+					stat = os.stat(src_fobj.fileno())
 					file_name = os.path.split(self.filename)[1]
 					file_time = time.gmtime(stat.st_mtime)
-					file_info = zipfile.ZipInfo("%s-%d" % (file_name, int(stat.st_mtime)), file_time)
+					file_info = zipfile.ZipInfo("%s.%d" % (file_name, int(stat.st_mtime)), file_time)
 					with archive.open(file_info, "w") as sink:
-						shutil.copyfileobj(src_fd, sink)
+						shutil.copyfileobj(src_fobj, sink)
 
 		except Exception as e:
 			logger.error("failed to rotate file %s: %s", self.filename, str(e))
@@ -121,7 +130,7 @@ class staged_file:
 			logger.debug("move %s to %s",self.filename, backup_name)
 			os.replace(self.filename, backup_name)
 		finally:
-			src_fd.close()
+			orig_fobj.close()
 
 
 class locked_path(os.PathLike):

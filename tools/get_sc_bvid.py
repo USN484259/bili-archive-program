@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 
+# This file is written with the assistance of opencode-deepseek-v4.1-flash
+
 import os
 import sys
 sys.path[0] = os.getcwd()
 
-import re
 import time
 import json
 import csv
@@ -33,7 +34,7 @@ async def get_bv_info(sess, bvid):
 	return resp.get("data")
 
 
-async def get_medal_info(sess, uid):
+async def get_medal_wall(sess, uid):
 	resp = await network.request(sess, "GET", MEDAL_WALL_URL, params = {"target_id": uid})
 	return resp.get("data")
 
@@ -70,6 +71,7 @@ if openpyxl:
 	class xlsx_writer:
 		def __init__(self, path):
 			self.path = path
+			self.f = open(path, mode = "xb")
 			self.wb = openpyxl.Workbook(write_only = True)
 			self.sheet = self.wb.active or self.wb.create_sheet()
 
@@ -78,9 +80,12 @@ if openpyxl:
 				if self.wb:
 					self.wb.save(self.path)
 					self.wb.close()
+				if self.f:
+					self.f.close()
 			finally:
 				self.wb = None
 				self.sheet = None
+				self.f = None
 
 		def __enter__(self):
 			return self
@@ -98,7 +103,7 @@ if openpyxl:
 
 def make_medal_str(info):
 	medal_name = info.get("medal_name")
-	medal_level = info.get("level")
+	medal_level = info.get("medal_level") or info.get("level")
 	if medal_name and medal_level:
 		return "%s %d" % (medal_name, medal_level)
 	else:
@@ -107,11 +112,13 @@ def make_medal_str(info):
 
 async def main(args):
 	sess = network.session()
-	stall = runtime.Stall(1)
+	stall = runtime.Stall()
 	if args.format == "xlsx":
 		if not openpyxl:
-			raise RuntimeError("xlsx format requires openpyxl library")
-		writer = xlsx_writer(args.output)
+			logger.warning("missing openpyxl library, using csv format")
+			writer = csv_writer(args.output)
+		else:
+			writer = xlsx_writer(args.output)
 	else:
 		writer = csv_writer(args.output)
 
@@ -140,20 +147,21 @@ async def main(args):
 						for bvid in bv_list:
 							try:
 								await stall()
-								info = await get_bv_info(sess, bvid)
-								duration += info["duration"]
+								bv_info = await get_bv_info(sess, bvid)
+								duration += bv_info["duration"]
 								result += "https://www.bilibili.com/video/%s\n" % bvid
-								title += info["title"] + '\n'
-								logger.info("%s\t%s\t%d\t%s", uname, bvid, info["duration"], info["title"])
+								title += bv_info["title"] + '\n'
+								logger.info("%s\t%s\t%d\t%s", uname, bvid, bv_info["duration"], bv_info["title"])
 
 							except Exception as e:
 								logger.warning("cannot get video info for %s: %s", bvid, str(e))
 						tm = time.localtime(obj["send_time"] // 1000)
 						time_str = "%d/%02d/%02d %02d:%02d:%02d.%03d" % (tm[:6] + (obj["send_time"] % 1000,))
-						duration_str = (duration >= 3600 and ("%d:" % duration // 3600) or "") + "%02d:%02d" % (duration % 3600 // 60, duration % 60)
+						duration_str = (duration >= 3600 and ("%d:" % (duration // 3600)) or "") + "%02d:%02d" % (duration % 3600 // 60, duration % 60)
 
 						# first try to find medal info in SC message
-						medal_info = info.get("medal_info", {})
+						medal_info = data.get("medal_info", {})
+						logger.trace("medal_info %s", medal_info)
 						if (args.target_uid is None) or medal_info.get("target_id") == args.target_uid:
 							medal = make_medal_str(medal_info)
 
@@ -161,12 +169,13 @@ async def main(args):
 							try:
 								logger.verbose("fetching medal info for user %s %d", uname, uid)
 								await stall()
-								medal_info = await get_medal_info(sess, uid)
-								assert(medal_info.get("name") == uname)
-								for obj in medal_info.get("list"):
-									info = obj.get("medal_info", {})
-									if info.get("target_id") == args.target_uid:
-										medal = make_medal_str(info)
+								medal_wall = await get_medal_wall(sess, uid)
+								logger.trace("medal_wall %s", medal_wall)
+								assert(medal_wall.get("name") == uname)
+								for entry in medal_wall.get("list"):
+									medal_info = entry.get("medal_info", {})
+									if medal_info.get("target_id") == args.target_uid:
+										medal = make_medal_str(medal_info)
 										break
 							except Exception as e:
 								logger.warning("cannot get medal info for %s: %s", uname, str(e))

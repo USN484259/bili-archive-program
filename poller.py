@@ -15,7 +15,7 @@ ns_in_sec = 1000 * 1000 * 1000
 
 # static objects
 
-logger = logging.getLogger("bili-arch.poller")
+logger = logging.getLogger("bili_arch.poller")
 
 
 # timerfd API

@@ -56,8 +56,8 @@ async def get_play_info(sess, bvid, cid):
 
 
 # stub
-def verify_bv(bv_root, ignore):
-	return verify.verify_bv(bv_root, ignore = ignore + "S")
+def verify_bv(bv_root, ignore, parts):
+	return verify.verify_bv(bv_root, ignore = ignore + "S", parts = parts)
 
 
 def is_interactive(info):
@@ -253,14 +253,14 @@ async def fetch_subtitle(sess, info, cid, path, force, stall = None):
 	return
 
 
-async def do_fix(sess, bv, path, /, stall = None, ignore = None, max_duration = None, **kwargs):
+async def do_fix(sess, bv, path, /, stall = None, ignore = None, max_duration = None, parts = None, **kwargs):
 	with fops.locked_path(path, bv) as bv_root:
 		info = None
 		exception = None
 		fetched_info = False
 
 		ignore = ignore or ""
-		stat = verify_bv(bv_root, ignore)
+		stat = verify_bv(bv_root, ignore, parts)
 		if verify.check_result(stat):
 			logger.info("skip existing %s", bv)
 			return
@@ -300,7 +300,7 @@ async def do_fix(sess, bv, path, /, stall = None, ignore = None, max_duration = 
 				break
 
 		if fetched_info:
-			stat = verify_bv(bv_root, ignore)
+			stat = verify_bv(bv_root, ignore, parts)
 			if not verify.check_result(stat):
 				raise RuntimeError("failed to fix " + bv)
 
@@ -309,7 +309,15 @@ async def do_fix(sess, bv, path, /, stall = None, ignore = None, max_duration = 
 			save_interactive(info.get("interactive"), bv_root)
 
 		if max_duration:
-			video_duration = info.get("duration", 0)
+			if parts:
+				video_duration = 0
+				for part in info.get("pages", []):
+					p_number = int(part.get("page"))
+					duration = int(part.get("duration", 0))
+					if p_number in parts:
+						video_duration += duration
+			else:
+				video_duration = info.get("duration", 0)
 			if video_duration > max_duration:
 				raise Exception("duration exceeds limit: %d/%d" % (video_duration, max_duration))
 
@@ -335,7 +343,7 @@ async def do_fix(sess, bv, path, /, stall = None, ignore = None, max_duration = 
 					logger.exception("failed to fetch part %s", cid)
 					exception = e
 
-		stat = verify_bv(bv_root, ignore)
+		stat = verify_bv(bv_root, ignore, parts)
 		if verify.check_result(stat):
 			logger.info("fixed %s", bv)
 			return
@@ -346,7 +354,7 @@ async def do_fix(sess, bv, path, /, stall = None, ignore = None, max_duration = 
 		raise exception
 
 
-async def do_update(sess, bv, path, force, /, stall = None, ignore = None, max_duration = None, **kwargs):
+async def do_update(sess, bv, path, force, /, stall = None, ignore = None, max_duration = None, parts = None, **kwargs):
 	info = await fetch_info(sess, bv, stall)
 	logger.info("downloading %s, title %s", bv, info.get("title", ""))
 	logger.trace(info)
@@ -372,7 +380,15 @@ async def do_update(sess, bv, path, force, /, stall = None, ignore = None, max_d
 			part_list = info.get("pages")
 
 		if max_duration:
-			video_duration = info.get("duration", 0)
+			if parts:
+				video_duration = 0
+				for part in part_list:
+					p_number = int(part.get("page"))
+					duration = int(part.get("duration", 0))
+					if p_number in parts:
+						video_duration += duration
+			else:
+				video_duration = info.get("duration", 0)
 			if video_duration > max_duration:
 				raise Exception("duration exceeds limit: %d/%d" % (video_duration, max_duration))
 
@@ -380,8 +396,16 @@ async def do_update(sess, bv, path, force, /, stall = None, ignore = None, max_d
 		logger.verbose("video parts %d", len(part_list))
 
 		for part in part_list:
+			p_number = int(part.get("page"))
 			cid = str(part.get("cid", ""))
-			logger.info("downloading %s, %s", cid, part.get("part", None) or part.get("title", ""))
+			title = part.get("part", None) or part.get("title", "")
+
+			logger.verbose("%s P%d, cid %s", bv, p_number, cid)
+			if parts and p_number not in parts:
+				logger.info("skipping P%d, %s", p_number, title)
+				continue
+
+			logger.info("downloading P%d, %s", p_number, title)
 			with fops.locked_path(bv_root, cid) as part_root:
 
 				try:
@@ -412,7 +436,7 @@ async def do_update(sess, bv, path, force, /, stall = None, ignore = None, max_d
 
 # methods
 
-async def download(sess, bv, video_root, mode, /, stall = None, msg_client = None, **kwargs):
+async def download(sess, bv, video_root, /, mode, stall = None, msg_client = None, **kwargs):
 	if mode == "fix" and not os.path.isfile(os.path.join(video_root, bv, "info.json")):
 		mode = "update"
 

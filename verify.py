@@ -106,7 +106,7 @@ def verify_cover(path, name, scan_files):
 	return True
 
 
-def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, duration_tolerance = None):
+def verify_bv(bv_root, *, ignore = "", parts = None, scan_files = False, duration_tolerance = None):
 	if scan_files and not ffprobe_bin:
 		logger.notice("ffprobe binary not found")
 		scan_files = False
@@ -119,18 +119,21 @@ def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, du
 		logger.verbose("verify video %s, scan %s, tolerance %.1f", bv_root, scan_files, duration_tolerance or math.nan)
 		if ignore:
 			logger.verbose("ignore %s", ignore)
+		if parts:
+			parts_str = ' '.join([str(val) for val in parts])
+			logger.verbose("parts %s", parts_str)
 		logger.debug("loading video info")
 		with open(os.path.join(bv_root, "info.json"), 'r') as f:
 			bv_info = json.load(f)
 
-		logger.info("%s, %s", bv_info.get("bvid"), bv_info.get("title"))
+		logger.verbose("%s, %s", bv_info.get("bvid"), bv_info.get("title"))
 
 		if 'C' not in ignore:
 			result["cover"] = False
 
 			cover_name = os.path.split(bv_info.get("pic", ""))[1]
 			if cover_name and verify_cover(bv_root, cover_name, scan_files):
-				result["cover"] = True
+				result["cover"] = cover_name
 			else:
 				logger.verbose("cover not found")
 
@@ -157,34 +160,37 @@ def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, du
 				logger.verbose("missing subtitles for %s", bv_info.get("bvid"))
 
 		for part in part_list:
+			p_number = int(part.get("page"))
 			cid = str(part.get("cid", ""))
+			title = part.get("part", None) or part.get("title", "")
 			part_duration = part.get("duration", None)
 
-			logger.info("cid %s, %s, %.1f sec", cid, part.get("part", None) or part.get("title", ""), part_duration or math.nan)
+			logger.verbose("P%d cid %s, %s, %.1f sec", p_number, cid, title, part_duration or math.nan)
+			if parts and p_number not in parts:
+				logger.verbose("skip P%d %s", p_number, title)
+				continue
 
 			part_stat = {}
 			result["parts"][cid] = part_stat
 
 			if 'V' not in ignore:
-				part_stat['V'] = 0
+				part_stat['V'] = []
 			if 'A' not in ignore:
-				part_stat['A'] = 0
+				part_stat['A'] = []
 			if 'D' not in ignore:
-				part_stat['D'] = 0
+				part_stat['D'] = []
 
 			if subtitle_table:
 				subtitle = subtitle_table.get(cid, {}).get("subtitles", [])
 				logger.verbose("subtitle count %d", len(subtitle))
 				if len(subtitle) > 0:
-					part_stat['S'] = 0
+					part_stat['S'] = []
 
 			part_root = os.path.join(bv_root, cid)
 			if not os.path.isdir(part_root):
-				logger.info("part dir not exist")
+				logger.verbose("part dir not exist")
 				continue
 
-			video_count = 0
-			audio_count = 0
 			no_audio = False
 			no_video = False
 
@@ -218,7 +224,7 @@ def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, du
 							continue
 
 					logger.verbose("found danmaku")
-					part_stat['D'] += 1
+					part_stat['D'].append(filename)
 					continue
 
 				if ext == ".json":
@@ -242,7 +248,7 @@ def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, du
 						for i, sub in enumerate(subtitle):
 							if sub.get("lan") == lan:
 								del subtitle[i]
-								part_stat['S'] += 1
+								part_stat['S'].append(filename)
 								break
 						else:
 							logger.verbose("subtitle not recorded %s", lan)
@@ -261,7 +267,7 @@ def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, du
 							continue
 
 					logger.verbose("found video")
-					video_count += 1
+					part_stat['V'].append(filename)
 					continue
 
 				if ext == ".m4a" and 'A' not in ignore:
@@ -273,7 +279,7 @@ def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, du
 							continue
 
 					logger.verbose("found audio")
-					audio_count += 1
+					part_stat['A'].append(filename)
 					continue
 
 				if ext == ".flv":
@@ -285,35 +291,33 @@ def verify_bv(bv_root, *, ignore = "", autoremove = None, scan_files = False, du
 							continue
 
 					logger.verbose("found video & audio")
-					video_count += 1
-					audio_count += 1
+					part_stat['V'].append(filename)
+					part_stat['A'].append(filename)
 					continue
 
 				logger.verbose("unknown type %s", ext)
 
-			logger.info("video_count %d, audio_count %d", video_count, audio_count)
+			video_count = len(part_stat['V'])
+			audio_count = len(part_stat['A'])
+			logger.verbose("video_count %d, audio_count %d", video_count, audio_count)
 
 			if 'V' not in ignore:
-				if video_count > 0:
-					part_stat['V'] = video_count
-				elif no_video:
+				if no_video and not video_count:
 					del part_stat['V']
 				else:
-					logger.info("missing video files")
+					logger.verbose("missing video files")
 
 			if 'A' not in ignore:
-				if audio_count > 0:
-					part_stat['A'] = audio_count
-				elif no_audio:
+				if no_audio and not audio_count:
 					del part_stat['A']
 				else:
-					logger.info("missing audio files")
+					logger.verbose("missing audio files")
 
 			if 'D' not in ignore and not part_stat['D']:
-				logger.info("missing danmaku file")
+				logger.verbose("missing danmaku file")
 
 			if not part_stat.get('S', True):
-				logger.info("missing subtitle")
+				logger.verbose("missing subtitle")
 
 		logger.verbose("verify done for %s", bv_info.get("bvid"))
 		result["info"] = True

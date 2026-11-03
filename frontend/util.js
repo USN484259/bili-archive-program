@@ -1,5 +1,83 @@
+// This file is written with the assistance of opencode-deepseek-v4.1-flash
+
 import * as config from "/config.js";
 
+
+// localStorage access for the global settings; returns null when settings are
+// disabled or the storage is not available (private mode, blocked cookies...)
+function settings_storage() {
+	if (!config.settings_enabled)
+		return null;
+	try {
+		return window.localStorage || null;
+	} catch {
+		return null;
+	}
+}
+
+// stored settings exactly as saved ({} when nothing has been saved yet), or
+// null when the storage is disabled / unavailable. settings.html uses this to
+// tell an absent key (show the default as a hint) from an explicit value.
+export function load_stored_settings() {
+	const storage = settings_storage();
+	if (!storage)
+		return null;
+
+	let text;
+	try {
+		text = storage.getItem(config.settings_key);
+	} catch {
+		return null;
+	}
+	if (!text)
+		return {};
+
+	try {
+		const result = JSON.parse(text);
+		if ((result === null) || (typeof result !== "object") || Array.isArray(result))
+			return {};
+		return result;
+	} catch {
+		return {};
+	}
+}
+
+// global settings with the template defaults filled in for absent keys
+export function load_settings() {
+	const loaded = load_stored_settings();
+	const result = loaded ? {...loaded} : {};
+	for (const key of Object.keys(config.settings_template)) {
+		if (!(key in result))
+			result[key] = config.settings_template[key][1];
+	}
+	return result;
+}
+
+// persist the settings object; returns false when the storage is unavailable
+export function save_settings(settings) {
+	const storage = settings_storage();
+	if (!storage)
+		return false;
+	try {
+		storage.setItem(config.settings_key, JSON.stringify(settings));
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+// drop the stored settings, so everything falls back to the template defaults
+export function clear_settings() {
+	const storage = settings_storage();
+	if (!storage)
+		return false;
+	try {
+		storage.removeItem(config.settings_key);
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 function on_iframe_navigation(ev) {
 	let a = ev.target;

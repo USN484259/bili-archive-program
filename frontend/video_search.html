@@ -185,7 +185,7 @@ let video_root = decodeURIComponent(params.get("path"));
 if (!video_root.endsWith('/'))
 	video_root += '/';
 
-const page_size = 20;
+let page_size = 20;
 let conditions = [];
 let page = 0;
 
@@ -336,7 +336,7 @@ function setResultsTable(state) {
 
 function saveSession(save_conds) {
 	try {
-		sessionStorage.setItem("video_search_page", page);
+		sessionStorage.setItem("video_search_offset", page * page_size);
 		if (save_conds) {
 			const sort = document.getElementById("sort_keys").value;
 			const order = document.getElementById("sort_order").value;
@@ -353,7 +353,7 @@ function loadSession() {
 		let conds = sessionStorage.getItem("video_search_conditions");
 		let sort = sessionStorage.getItem("video_search_sort");
 		let order = sessionStorage.getItem("video_search_order");
-		let savedPage = sessionStorage.getItem("video_search_page");
+		let savedOffset = sessionStorage.getItem("video_search_offset");
 		if (conds) {
 			try {
 				conds = JSON.parse(conds);
@@ -375,8 +375,8 @@ function loadSession() {
 				if (orderElem.options[i].value === order) orderElem.selectedIndex = i;
 			}
 		}
-		if (savedPage) {
-			page = parseInt(savedPage) || 0;
+		if (savedOffset) {
+			page = Math.floor((parseInt(savedOffset) || 0) / page_size);
 		}
 	} catch {}
 }
@@ -523,6 +523,8 @@ async function updateFlags() {
 
 document.addEventListener("DOMContentLoaded", () => util_module.then((util) => {
 	globalThis.util = util;
+	const settings = util.load_settings();
+	page_size = settings["video_search.items_per_page"];
 
 	const video_link = document.getElementById("video_link");
 	video_link.href = video_root + "index.html";

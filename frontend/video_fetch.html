@@ -12,8 +12,15 @@
 			<input name="bvid" id="bv_input" required autofocus />
 		</span>
 		<span class="right">
-			<label for="max_duration">max duration </label>
-			<input type=number name="max_duration" id="max_duration" min="0"/>
+			<span>
+				<label for="max_duration">max duration </label>
+				<input type=number name="max_duration" id="max_duration" min="0"/>
+			</span>
+			<br>
+			<span>
+				<label for="parts">parts </label>
+				<input name="parts" id="parts" placeholder="space separated part numbers"/>
+			</span>
 		</span>
 		<input type="submit" value="schedule" />
 		<output id="msg"></output>
@@ -204,6 +211,8 @@ class TaskList {
 
 addEventListener("DOMContentLoaded", () => util_module.then((util) => {
 	globalThis.util = util;
+	let settings = util.load_settings();
+
 	let task_list = new TaskList()
 	let form_elem = document.forms["fetch_form"];
 
@@ -216,6 +225,13 @@ addEventListener("DOMContentLoaded", () => util_module.then((util) => {
 		let match = bvid.match(bv_url_pattern);
 		if (match)
 			form_data.set("bvid", match[1]);
+
+		const max_duration = settings["video_fetch.max_duration"];
+		if (max_duration > 0) {
+			let form_duration = form_data.get("max_duration");
+			if (form_duration === '')
+				form_data.set("max_duration", max_duration);
+		}
 
 		for (let [name, value] of Array.from(form_data.entries())) {
 			if (value === '') form_data.delete(name);
@@ -237,7 +253,7 @@ addEventListener("DOMContentLoaded", () => util_module.then((util) => {
 	});
 
 	task_list.update()
-	setInterval(() => {task_list.update()}, 4 * 1000)
+	setInterval(() => {task_list.update()}, settings["video_fetch.refresh_interval"] * 1000)
 }));
 	</script>
 </body>

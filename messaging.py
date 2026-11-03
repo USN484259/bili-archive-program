@@ -18,6 +18,7 @@ from fops import create_unix_socket
 recv_bufsize = 0x10000
 retry_count = 1
 
+MSG_ADDR_ENV_KEY = "BILI_ARCH_MSG_ADDR"
 
 # static objects
 
@@ -30,9 +31,6 @@ msg_handler = {
 	"text": lambda d: d.decode(),
 	"json": lambda d: json_loads(d.decode()),
 }
-
-msg_env_addr = os.environ.get("BILI_ARCH_MSG_ADDR")
-
 
 # server
 
@@ -343,7 +341,7 @@ class MessagingServer(BaseServer):
 			if _type == 'ctrl':
 				self.handle_client_cmd(client, topic, sp[1])
 			else:
-				self.foreach_client(self.forward_message, topic, data)
+				self.handle_client_data(client, topic, data)
 			return topic
 		except Exception as e:
 			logger.warning("bad message: %s", str(e))
@@ -371,6 +369,10 @@ class MessagingServer(BaseServer):
 		if '*' in client.subscriptions or topic in client.subscriptions:
 			logger.verbose("forwarding to client %s (%d)", client.name, client.fileno())
 			self.send(client, data)
+
+
+	def handle_client_data(self, client, topic, data):
+		self.foreach_client(self.forward_message, topic, data)
 
 
 # client
@@ -442,12 +444,20 @@ class MessagingClient:
 				return connect_unix(path)
 
 
+	@staticmethod
+	def pack_message(content_type, topic, data):
+		payload = bytearray("00000000 %s %s\n" % (content_type, topic), 'utf-8')
+		payload += data
+		payload[0:8] = b"%08x" % len(payload)
+		return payload
+
+
 	def __init__(self, addr = None, /, allow_dummy = True, *, reconnect = None):
 		logger.debug("creating %s %x", type(self).__name__, id(self))
 		if reconnect and Timer.dummy:
 			logger.warning("no timer support on this platform, reconnect do not work")
 
-		self.msg_addr = addr or msg_env_addr
+		self.msg_addr = addr or os.environ.get(MSG_ADDR_ENV_KEY)
 		self.allow_dummy = allow_dummy
 		self.reconnect_ms = reconnect and int(reconnect * 1000)
 		self.poller = Poller(edge = False)
@@ -558,8 +568,7 @@ class MessagingClient:
 
 	def _do_subscribe(self):
 		logger.verbose("subscribing %s", self.subscription)
-		payload = bytearray("00000000 ctrl subscribe\n" + self.subscription, 'utf-8')
-		payload[0:8] = b"%08x" % len(payload)
+		payload = self.pack_message("ctrl", "subscribe", self.subscription.encode())
 		return self._send_out(payload, "subscribe")
 
 
@@ -591,9 +600,7 @@ class MessagingClient:
 
 			logger.debug("send %s %s %d", topic, content_type, len(data))
 
-			payload = bytearray("00000000 %s %s\n" % (content_type, topic), 'utf-8')
-			payload += data
-			payload[0:8] = b"%08x" % len(payload)
+			payload = self.pack_message(content_type, topic, data)
 
 		logger.trace(payload)
 		return self._send_out(payload, "send")

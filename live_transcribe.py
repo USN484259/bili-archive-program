@@ -66,6 +66,7 @@ import threading
 import tempfile
 import select
 from contextlib import suppress
+from functools import partial
 from urllib.parse import urljoin
 
 httpx = None
@@ -73,7 +74,7 @@ with suppress(ModuleNotFoundError):
 	import httpx
 
 import constants
-from utils import logger_init
+from utils import logger_init, parse_size
 from messaging import MessagingClient
 
 # constants
@@ -97,6 +98,7 @@ url_pattern = re.compile(r"^https?://")
 whisper_bin = shutil.which("whisper-cli")
 ffmpeg_bin = shutil.which("ffmpeg")
 
+psutil = None
 
 # helper functions
 
@@ -535,6 +537,7 @@ class HttpReader:
 class LocalFileReader:
 	def __init__(self, path):
 		logger.debug("creating %s, path %s", type(self).__name__, path)
+		self.path = path
 		self.file = open(path, "rb")
 		self.size = None
 		with suppress(OSError):
@@ -638,44 +641,52 @@ def post_api(sess, api_url, op, *media_url):
 		logger.warning("cannot %s %s from list: %s", op, " ".join(media_url), str(e))
 
 
-def http_main(args, msg_client):
+def http_main(sess, args, msg_client, /, load_func = None):
 	summary = {}
-	with httpx.Client(timeout = httpx.Timeout(120, connect = 10)) as sess:
-		api_url = args.url
-		resp = sess.get(api_url)
-		resp.raise_for_status()
-		info = resp.json()
-		logger.debug(info)
+	api_url = args.url
+	logger.verbose("http_main: GET %s", api_url)
+	resp = sess.get(api_url)
+	resp.raise_for_status()
+	info = resp.json()
+	logger.debug(info)
 
-		hash_methods = info.get("hash") or []
-		if args.hash:
-			if args.hash not in hash_methods:
-				logger.warning("%s not accepted by server: %s", args.hash, ", ".join(hash_methods))
-			hash_name = args.hash
-		else:
-			hash_name = hash_methods and hash_methods[0] or None
+	hash_methods = info.get("hash") or []
+	if args.hash:
+		if args.hash not in hash_methods:
+			logger.warning("%s not accepted by server: %s", args.hash, ", ".join(hash_methods))
+		hash_name = args.hash
+	else:
+		hash_name = hash_methods and hash_methods[0] or None
 
-		media_list = info.get("pending", [])
-		# the server may report hashing_speed as None (e.g. no hashes configured
-		# or the worker has not measured yet); fall back to a sane default used
-		# only for sizing the PUT 503 retry budget below
-		hashing_speed = info.get("hashing_speed") or hashing_speed_default
-		whisper = WhisperCli(args.model, args.vad, args.no_gpu)
-		logger.info("server mode: %d media file(s), hash %s", len(media_list), hash_name or "none (size check)")
+	media_list = info.get("pending", [])
+	if not media_list:
+		logger.verbose("no pending media")
+		return
 
-		for media_url in media_list:
-			try:
-				(name, ext) = os.path.splitext(media_url)
-				if not name or ext not in transcribe_targets:
-					logger.warning("unsupported media type %s", media_url)
-					continue
-				srt_url = media_url + ".srt"
+	if load_func and not load_func():
+		logger.verbose("system at high load, skipping")
+		return
 
-				logger.info("transcribing %s", media_url)
-				with HttpReader(sess, urljoin(api_url, media_url), hash_name) as source:
-					segments = transcribe(source, whisper, args.chunk_time, show_progress = (not args.no_progress))
-					file_size = source.get_size()
-					hash_value = source.get_hash()
+	# the server may report hashing_speed as None (e.g. no hashes configured
+	# or the worker has not measured yet); fall back to a sane default used
+	# only for sizing the PUT 503 retry budget below
+	hashing_speed = info.get("hashing_speed") or hashing_speed_default
+	whisper = WhisperCli(args.model, args.vad, args.no_gpu)
+	logger.info("server mode: %d media file(s), hash %s", len(media_list), hash_name or "none (size check)")
+
+	for media_url in media_list:
+		try:
+			(name, ext) = os.path.splitext(media_url)
+			if not name or ext not in transcribe_targets:
+				logger.warning("unsupported media type %s", media_url)
+				continue
+			srt_url = media_url + ".srt"
+
+			logger.info("transcribing %s", media_url)
+			with HttpReader(sess, urljoin(api_url, media_url), hash_name) as source:
+				segments = transcribe(source, whisper, args.chunk_time, show_progress = (not args.no_progress))
+				file_size = source.get_size()
+				hash_value = source.get_hash()
 
 				srt_content = convert_to_srt(segments)
 				logger.info("%s done with %d lines", media_url, len(segments))
@@ -687,41 +698,45 @@ def http_main(args, msg_client):
 					summary[media_url] = "(empty)"
 					continue
 
-				params = {}
-				retries = put_retry_min
+			params = {}
+			retries = put_retry_min
 
-				if file_size is not None:
-					params["size"] = file_size
-					# approximate how many put_retry_delay-second pauses the backend
-					# needs to hash the whole file; sizes the 503 retry budget
-					retries = 1 + file_size // (put_retry_delay * hashing_speed * bytes_in_MiB)
-					retries = min(max(retries, put_retry_min), put_retry_max)
+			if file_size is not None:
+				params["size"] = file_size
+				# approximate how many put_retry_delay-second pauses the backend
+				# needs to hash the whole file; sizes the 503 retry budget
+				retries = 1 + file_size // (put_retry_delay * hashing_speed * bytes_in_MiB)
+				retries = min(max(retries, put_retry_min), put_retry_max)
 
-				if hash_name:
-					params[hash_name] = hash_value
+			if hash_name:
+				params[hash_name] = hash_value
 
-				path = None
-				resp_code = put_srt(sess, urljoin(api_url, srt_url), params, srt_content, retries)
-				if resp_code == 201:
-					logger.info("PUT ok %d for %s, removing from list", resp_code, media_url)
-					post_api(sess, api_url, "done", media_url)
-					path = srt_url
-				else:
-					logger.error("PUT %s failed with %d", srt_url, resp_code)
-					path = save_fallback(srt_url, srt_content)
+			path = None
+			resp_code = put_srt(sess, urljoin(api_url, srt_url), params, srt_content, retries)
+			if resp_code == 201:
+				logger.info("PUT ok %d for %s, removing from list", resp_code, media_url)
+				post_api(sess, api_url, "done", media_url)
+				path = srt_url
+			else:
+				logger.error("PUT %s failed with %d", srt_url, resp_code)
+				path = save_fallback(srt_url, srt_content)
 
-				if path and msg_client:
-					msg_client.send(constants.topic.transcribe, json = {
-						"server":	api_url,
-						"media":	media_url,
-						"status":	resp_code,
-						"srt_path":	path,
-					})
+			if path and msg_client:
+				msg_client.send(constants.topic.transcribe, json = {
+					"server":	api_url,
+					"media":	media_url,
+					"status":	resp_code,
+					"srt_path":	path,
+				})
 
-				summary[media_url] = path
+			summary[media_url] = path
 
-			except Exception:
-				logger.exception("exception in transcribing %s", media_url)
+			if load_func and not load_func():
+				logger.verbose("system at high load, skipping")
+				break
+
+		except Exception:
+			logger.exception("exception in transcribing %s", media_url)
 
 	return summary
 
@@ -762,12 +777,56 @@ def local_main(args, msg_client):
 	return summary
 
 
+def show_summary(summary):
+	if summary is None:
+		return
+	logger.info("processed %d media", len(summary))
+	json.dump(summary, sys.stdout, indent = '\t', ensure_ascii = False)
+
+
+def parse_mem_cap(cap_mem):
+	if cap_mem.endswith('%'):
+		return float(cap_mem.rstrip('%'))
+	else:
+		cap = parse_size(cap_mem)
+		if cap < 0x1000:
+			logger.warning("invalid mem cap %d, set to %d", cap, 0x1000)
+			cap = 0x1000
+		return cap
+
+
+def check_system_load_caps(cpu_cap, mem_cap):
+	try:
+		if cpu_cap is not None:
+			cpu_count = psutil.cpu_count()
+			cpu_loads = psutil.getloadavg()
+			logger.verbose("cpu count %d, load %.1f %.1f %.1f", cpu_count, *cpu_loads)
+			for i in (0, 1):
+				if cpu_loads[i] * 100 / cpu_count + cpu_cap > 100:
+					return False
+
+		if mem_cap is not None:
+			meminfo = psutil.virtual_memory()
+			logger.verbose("mem total %d, available %d, used %.1f%%", meminfo.total, meminfo.available, meminfo.percent)
+			if mem_cap <= 100:
+				if meminfo.percent + mem_cap > 100:
+					return False
+			else:
+				if meminfo.available < mem_cap:
+					return False
+
+	except Exception as e:
+		logger.warning("failed to check system load: %s", e)
+
+	return True
+
 # main entry
 
 def main(args):
 	global whisper_bin
 	global ffmpeg_bin
 	global fallback_dir
+	global psutil
 
 	if args.hash and args.hash not in hashlib.algorithms_available:
 		raise ValueError("invalid hash method %s" % args.hash)
@@ -781,6 +840,16 @@ def main(args):
 		raise FileNotFoundError(args.model)
 	fallback_dir = args.fallback or fallback_dir
 
+	if args.nice is not None or args.monitor:
+		nice_value = (args.nice is None) and 10 or args.nice
+		try:
+			import psutil
+			proc = psutil.Process()
+			proc.nice(nice_value)
+			proc.ionice(psutil.IOPRIO_CLASS_IDLE)
+		except Exception as e:
+			logger.notice("cannot set process priority: %s", str(e))
+
 	msg_client = MessagingClient(args.msg_addr)
 
 	if args.url and url_pattern.match(args.url):
@@ -788,20 +857,50 @@ def main(args):
 			logger.warning("running server mode, ignoring local files")
 		if httpx is None:
 			raise RuntimeError("missing httpx library")
-		summary = http_main(args, msg_client)
+
+		if args.monitor:
+			cpu_cap = None
+			mem_cap = None
+			if (args.cap_cpu or args.cap_mem) and not psutil:
+				logger.warning("missing psutil library, ignoring cpu/mem caps")
+			else:
+				if args.cap_cpu:
+					cpu_cap = float(args.cap_cpu.rstrip('%'))
+					logger.verbose("cpu cap %.1f%%", cpu_cap)
+				if args.cap_mem:
+					mem_cap = parse_mem_cap(args.cap_mem)
+					if mem_cap <= 100:
+						logger.verbose("mem cap %.1f%%", mem_cap)
+					else:
+						logger.verbose("mem cap %d", mem_cap)
+
+			load_func = partial(check_system_load_caps, cpu_cap, mem_cap)
+		else:
+			load_func = None
+
+		with httpx.Client(timeout = httpx.Timeout(120, connect = 10)) as sess:
+			while True:
+				summary = http_main(sess, args, msg_client, load_func)
+				show_summary(summary)
+
+				if not args.monitor:
+					break
+
+				logger.verbose("sleep %d sec", args.interval)
+				time.sleep(args.interval)
+
 	elif args.files:
 		summary = local_main(args, msg_client)
+		show_summary(summary)
 	else:
 		raise ValueError("specify --url (server mode) or local files")
-
-	logger.info("processed %d media", len(summary))
-	json.dump(summary, sys.stdout, indent = '\t', ensure_ascii = False)
 
 
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser(description = "live transcription with whisper.cpp")
 
 	parser.add_argument("-v", "--verbose", action = "count", default = 0)
+	parser.add_argument("--nice", type = int)
 	parser.add_argument("--model", required = True, help = "whisper model path (whisper-large-v3)")
 	parser.add_argument("--vad", help = "VAD model path (ggml-silero)")
 	parser.add_argument("--whisper", help = "whisper-cli binary path")
@@ -810,6 +909,10 @@ if __name__ == "__main__":
 	parser.add_argument("-np", "--no-progress", action = "store_true", help = "do not print progress")
 	parser.add_argument("-t", "--chunk-time", type = int, default = 1800, help = "audio chunk length in seconds (default 1800)")
 	parser.add_argument("-r", "--url", help = "server API URL (server mode)")
+	parser.add_argument("--monitor", action = "store_true", help = "enable monitor mode, poll server in a loop and transcribe new files")
+	parser.add_argument("-i", "--interval", type = int, default = 120, help = "poll interval in monitor mode")
+	parser.add_argument("--cap-cpu", help = "for monitor mode, pause when cpu idle time is lower than this percentage")
+	parser.add_argument("--cap-mem", help = "for monitor mode, pause when available RAM is lower than this value or percentage")
 	parser.add_argument("--hash", help = "force hash method for server PUT verification")
 	parser.add_argument("--fallback", help = "fallback folder to save SRT files when PUT fails")
 	parser.add_argument("--msg_addr", help = "messaging server address to broadcast transcription status")

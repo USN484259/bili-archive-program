@@ -240,9 +240,10 @@ function update() {
 
 async function main(util) {
 	globalThis.util = util;
+	const settings = util.load_settings();
 
 	update();
-	setInterval(update, 30 * 1000);
+	setInterval(update, settings["live_page.refresh_interval"] * 1000);
 }
 
 addEventListener("DOMContentLoaded", () => util_module.then(main));

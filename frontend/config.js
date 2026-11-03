@@ -17,3 +17,14 @@ export const live_danmaku_api = "/api/danmaku"
 export const bili_proxy_api = "/api/bili_proxy"
 export const image_cache_api = "/api/image_cache"
 export const transcription_api = "/api/transcription"
+
+export const settings_enabled = true
+export const settings_key = "bili_arch_settings"
+export const settings_template = {
+	"video_fetch.max_duration" : [">0", 0],
+	"video_fetch.refresh_interval" : [">0", 4],
+	"video_search.items_per_page" : [">0", 20],
+	"live_page.refresh_interval": [">0", 30],
+	"video_page.history_enabled" : ["bool", false],
+	"video_page.history_flag" : ["name", "viewed"],
+}

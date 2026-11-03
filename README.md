@@ -53,6 +53,7 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 ## http前端使用说明
 
 + index.html		目录索引，列出当前目录下的文件，对特定文件显示可用的操作
++ settings.html		全局页面设置，使用浏览器localStorage记录用户设置
 + player.html		通用播放器，播放 FLV / HLS / m4v+m4a
 + video_page.html	视频页面，显示BV基本信息，视频分P播放，获取相关推荐BV
 + video_fetch.html	视频缓存页面，输入BV号缓存视频，显示缓存状态
@@ -103,6 +104,7 @@ Utilities to download content from [Bilibili](https://www.bilibili.com)
 |	项目			|	浏览器	|	javascript	|	flv.min.js	|	hls.min.js	|
 |	----			|	----	|	----		|	----		|	----		|
 |	index.html		|	any	|	M		|			|			|
+|	settings.html		|	any	|	M		|			|			|
 |	player.html		|	any	|	M		|	O		|	O		|
 |	video_page.html		|	any	|	M		|			|			|
 |	video_fetch.html	|	any	|	M		|			|			|

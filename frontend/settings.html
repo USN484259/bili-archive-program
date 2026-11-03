@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<!--This file is mostly designed and implemented by opencode-deepseek-v4.1-flash-->
+<html>
+<head>
+	<meta charset="utf-8">
+</head>
+<body>
+	<h1>Global Settings</h1>
+	<div id="status"></div>
+	<table id="settings">
+		<thead>
+			<tr>
+				<th>key</th>
+				<th>value</th>
+				<th>type</th>
+			</tr>
+		</thead>
+		<tbody id="settings_body">
+		</tbody>
+	</table>
+	<div id="controls">
+		<button id="save" disabled>save</button>
+		<button id="clear" disabled>clear</button>
+	</div>
+
+<style>
+#status {
+	margin: 10px 0;
+	min-height: 1.2em;
+}
+#status.error {
+	color: #c00;
+}
+table {
+	width: 100%;
+	border-collapse: collapse;
+}
+thead {
+	border: 1px solid;
+}
+th, td {
+	padding: 6px 10px;
+	text-align: left;
+}
+tbody tr:nth-child(odd) {
+	background-color: #cccccc;
+}
+tbody tr:nth-child(even) {
+	background-color: #eeeeee;
+}
+/*
+.setting-key, .setting-value {
+	width: 100%;
+	box-sizing: border-box;
+	padding: 2px 4px;
+}
+.setting-key {
+	background-color: #f0f0f0;
+	color: #555;
+}
+*/
+.setting-type {
+	color: #666;
+	white-space: nowrap;
+}
+tr.invalid .setting-value {
+	background-color: #fdd;
+}
+#controls {
+	margin-top: 10px;
+}
+#controls button {
+	padding: 6px 20px;
+	margin-right: 8px;
+}
+body.readonly {
+	color: #888;
+}
+body.readonly table {
+	opacity: 0.7;
+}
+</style>
+
+	<script type="module">
+
+import * as config from "/config.js";
+const util_module = import(config.util_module);
+
+// type_name -> [validate(raw input string), convert(raw input string)]
+const settings_types = {
+	">0" : [(val) => /^\d+$/.test(val) && parseInt(val, 10) > 0, (val) => parseInt(val, 10)],
+	"bool": [(val) => (val === "true" || val === "false"), (val) => (val === "true")],
+	"name": [(val) => /^\w+$/.test(val), (val) => val],
+};
+
+let util = null;
+let rows = [];
+let status_elem = null;
+let save_button = null;
+let clear_button = null;
+
+function set_status(text, error = false) {
+	status_elem.textContent = text;
+	status_elem.classList.toggle("error", !!error);
+}
+
+// stored: the settings exactly as saved (absent keys are not in it)
+function render_settings(stored, readonly) {
+	const body = document.getElementById("settings_body");
+	body.innerHTML = "";
+	rows = [];
+
+	for (const [key, [type_name, default_value]] of Object.entries(config.settings_template)) {
+		const tr = document.createElement("tr");
+
+		const key_td = document.createElement("td");
+		key_td.className = "setting-key";
+		key_td.textContent = key;
+		tr.appendChild(key_td);
+
+		const value_td = document.createElement("td");
+		const value_input = document.createElement("input");
+		value_input.type = "text";
+		value_input.className = "setting-value";
+		value_input.autocomplete = "off";
+		// absent key: blank input with the default value as hint
+		value_input.placeholder = String(default_value);
+		const value = stored[key];
+		if ((value !== undefined) && (value !== null))
+			value_input.value = String(value);
+		value_input.disabled = readonly;
+		value_td.appendChild(value_input);
+		tr.appendChild(value_td);
+
+		const type_td = document.createElement("td");
+		type_td.className = "setting-type";
+		type_td.textContent = type_name;
+		tr.appendChild(type_td);
+
+		body.appendChild(tr);
+		rows.push({key, type_name, input: value_input, row: tr});
+	}
+}
+
+function on_save() {
+	const result = {};
+	for (const item of rows) {
+		item.row.classList.remove("invalid");
+		const text = item.input.value.trim();
+		if (text === "")
+			continue;	// a blank input removes this key
+
+		const type = settings_types[item.type_name];
+		if (!type) {
+			item.row.classList.add("invalid");
+			set_status("unknown type " + item.type_name + " for " + item.key, true);
+			return;
+		}
+		if (!type[0](text)) {
+			item.row.classList.add("invalid");
+			set_status("invalid value for " + item.key + ", expected " + item.type_name, true);
+			item.input.focus();
+			return;
+		}
+		result[item.key] = type[1](text);
+	}
+
+	if (!util.save_settings(result)) {
+		set_status("cannot save settings, localStorage is unavailable", true);
+		return;
+	}
+	// re-render from what was actually stored so blank inputs show the hint
+	render_settings(result, false);
+	set_status("saved");
+}
+
+function on_clear() {
+	if (!util.clear_settings()) {
+		set_status("cannot clear settings, localStorage is unavailable", true);
+		return;
+	}
+	render_settings({}, false);
+	set_status("cleared, everything is back to the default");
+}
+
+addEventListener("DOMContentLoaded", () => util_module.then((module) => {
+	util = module;
+	status_elem = document.getElementById("status");
+	save_button = document.getElementById("save");
+	clear_button = document.getElementById("clear");
+
+	// null means settings are disabled or localStorage is unavailable
+	const stored = util.load_stored_settings();
+	const readonly = (stored === null);
+
+	render_settings(stored || {}, readonly);
+
+	if (readonly) {
+		save_button.disabled = true;
+		clear_button.disabled = true;
+		document.body.classList.add("readonly");
+		set_status(config.settings_enabled
+			? "read-only: localStorage is unavailable"
+			: "read-only: settings are disabled in config.js");
+	} else {
+		save_button.disabled = false;
+		clear_button.disabled = false;
+		save_button.addEventListener("click", on_save);
+		clear_button.addEventListener("click", on_clear);
+	}
+}));
+
+	</script>
+</body>
+</html>

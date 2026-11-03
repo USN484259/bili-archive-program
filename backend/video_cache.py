@@ -228,6 +228,17 @@ class bv_play_handler(HttpResponseMixin, FcgiHandler):
 						logger.notice("invalid max_duration")
 						return self.send_response(400)
 
+				parts_param = query.get("parts")
+				if parts_param and parts_param[0]:
+					try:
+						logger.debug(parts_param)
+						parts = parts_param[0].split()
+						args["parts"] = [int(val) for val in parts]
+						logger.verbose("parts %s", ' '.join(parts))
+					except (ValueError, TypeError):
+						logger.notice("invalid parts")
+						return self.send_response(400)
+
 				if "audio_only" in query:
 					args["ignore"] = 'V'
 

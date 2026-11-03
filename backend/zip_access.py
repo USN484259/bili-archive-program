@@ -23,7 +23,7 @@ ZIP_CACHE_LIMIT = 0x40
 ZIP_CLOSE_TIMEOUT = 120 * 1000
 POLL_INTERVAL_MS = 60 * 1000
 
-logger = logging.getLogger("bili-arch.zip_access")
+logger = logging.getLogger("bili_arch.zip_access")
 
 
 class zip_access_handler(HttpResponseMixin, FcgiHandler):

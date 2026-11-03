@@ -9,7 +9,7 @@ DEFAULT_NAME_MAP = {
 	"novideo": ".novideo",
 	"noaudio": ".noaudio",
 	"hls_index": "index.m3u8",
-	"rotate_postfix": "-rotate.zip",
+	"rotate_postfix": ".zip",
 	"backup_postfix": ".bak",
 	"danmaku_socket": "danmaku.socket",
 }
